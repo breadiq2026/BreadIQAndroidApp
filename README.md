@@ -27,7 +27,7 @@ app/src/main/java/com/BreadIQ/myapp/
 ├── screens/                # One composable per screen (replaces Screens/*.swift) — currently placeholders
 ├── ui/theme/               # Colors ported from BreadIQColors.swift, Material3 theme
 ├── core/                   # (empty) — business logic, calculators, services land here (replaces Core/*.swift)
-├── model/                  # (empty) — data models (replaces Models/*.swift)
+├── model/                  # Plain-value-type data models, ported from Models/*.swift — see PORTING_PLAN.md step 1
 └── data/                   # (empty) — Supabase client, repositories, local persistence
 ```
 

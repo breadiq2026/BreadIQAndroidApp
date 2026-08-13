@@ -3,7 +3,9 @@
 /local.properties
 /.idea/
 .DS_Store
-/build
+# Not just top-level /build — every module (app/, and any future
+# modules) has its own generated build/ directory that needs excluding.
+**/build/
 /captures
 .externalNativeBuild
 .cxx

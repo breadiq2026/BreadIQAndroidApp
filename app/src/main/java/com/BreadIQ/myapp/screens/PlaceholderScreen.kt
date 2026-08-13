@@ -14,7 +14,7 @@ import androidx.compose.ui.unit.dp
 
 /**
  * Shared stand-in for each of the 5 tab screens until they're ported
- * one-by-one from the iOS Screens/*.swift files (CalculatorScreen.swift,
+ * one-by-one from the iOS app's Screens directory (CalculatorScreen.swift,
  * RecipesScreen.swift, LexiconScreen.swift, QueueScreen.swift,
  * CurrentBakeScreen.swift). See PORTING_PLAN.md for sequencing.
  */

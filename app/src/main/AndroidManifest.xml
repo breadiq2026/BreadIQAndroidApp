@@ -1,6 +1,11 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
+    <!-- Required as of this step (PORTING_PLAN.md step 2) — Supabase Auth
+         calls are the app's first real network traffic; nothing needed it
+         before this. -->
+    <uses-permission android:name="android.permission.INTERNET" />
+
     <application
         android:name=".BreadIQApplication"
         android:allowBackup="true"

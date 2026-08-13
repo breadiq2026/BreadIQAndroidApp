@@ -48,6 +48,8 @@ android {
 dependencies {
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.lifecycle.runtime.ktx)
+    implementation(libs.androidx.lifecycle.viewmodel.ktx)
+    implementation(libs.androidx.lifecycle.runtime.compose)
     implementation(libs.androidx.activity.compose)
     implementation(platform(libs.androidx.compose.bom))
     implementation(libs.androidx.ui)
@@ -56,6 +58,19 @@ dependencies {
     implementation(libs.androidx.material3)
     implementation(libs.androidx.material.icons.extended)
     implementation(libs.androidx.navigation.compose)
+
+    // supabase-kt (Auth + Postgrest) — same Supabase project as iOS. See
+    // data/SupabaseConfig.kt. Ktor's Android engine is supabase-kt's
+    // recommended HTTP client engine for this platform.
+    implementation(platform(libs.supabase.bom))
+    implementation(libs.supabase.auth)
+    implementation(libs.supabase.postgrest)
+    implementation(libs.ktor.client.android)
+    // For decoding supabase-kt's own @Serializable types (e.g. UserSession
+    // in KeystoreSessionManager) — not for any of our own DTOs yet, so the
+    // kotlin("plugin.serialization") compiler plugin isn't needed until
+    // this app defines its own @Serializable classes.
+    implementation(libs.kotlinx.serialization.json)
 
     testImplementation(libs.junit)
     androidTestImplementation(libs.androidx.junit)

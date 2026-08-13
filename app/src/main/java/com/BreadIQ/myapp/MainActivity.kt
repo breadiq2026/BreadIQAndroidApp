@@ -4,14 +4,20 @@ import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.activity.viewModels
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation.NavDestination.Companion.hierarchy
 import androidx.navigation.NavGraph.Companion.findStartDestination
 import androidx.navigation.compose.NavHost
@@ -19,30 +25,59 @@ import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import com.BreadIQ.myapp.navigation.BreadIQDestination
+import com.BreadIQ.myapp.screens.AuthScreen
 import com.BreadIQ.myapp.screens.CalculatorScreen
 import com.BreadIQ.myapp.screens.CurrentBakeScreen
 import com.BreadIQ.myapp.screens.LexiconScreen
 import com.BreadIQ.myapp.screens.QueueScreen
 import com.BreadIQ.myapp.screens.RecipesScreen
 import com.BreadIQ.myapp.ui.theme.BreadIQTheme
+import com.BreadIQ.myapp.viewmodel.AuthViewModel
+import com.BreadIQ.myapp.viewmodel.AuthViewModelFactory
 
 /**
  * Entry point / replaces `RootView.swift` + `MainTabView.swift`. Hosts
  * the 5-tab bottom navigation shell; each tab body is a placeholder
- * pending its own porting pass (see PORTING_PLAN.md). Auth-gating
- * (RootView switches between AuthScreen and MainTabView based on
- * AuthStore's session) is not wired up yet — this always shows the
- * main tab shell.
+ * pending its own porting pass (see PORTING_PLAN.md).
+ *
+ * **Auth-gating now wired up** (PORTING_PLAN.md step 3), matching
+ * `RootView.swift`'s three-state split — loading / signed-out /
+ * signed-in — via `AuthViewModel.uiState`: a loading spinner while the
+ * initial session check is in flight, [AuthScreen] when there's no
+ * session, the tab shell when there is. Deliberately narrower than
+ * `RootView.swift`, which this same three-way split sits inside of on
+ * iOS: no password-recovery deep-link branch (no deep-link infra exists
+ * on Android yet — see `AuthServicing`'s own doc comment), no bake-session
+ * reconciliation or subscription-store login/logout binding (those depend
+ * on ported features — `BakeSessionEngine`, `SubscriptionStore` — that
+ * don't exist here yet either). Just the auth split, which is what this
+ * step's source-file list actually asked for.
  */
 class MainActivity : ComponentActivity() {
+    private val authViewModel: AuthViewModel by viewModels {
+        AuthViewModelFactory(applicationContext)
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         setContent {
             BreadIQTheme {
-                BreadIQApp()
+                val uiState by authViewModel.uiState.collectAsStateWithLifecycle()
+                when {
+                    uiState.isLoading -> LoadingScreen()
+                    uiState.currentUser == null -> AuthScreen(authViewModel)
+                    else -> BreadIQApp()
+                }
             }
         }
+    }
+}
+
+@Composable
+private fun LoadingScreen() {
+    Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+        CircularProgressIndicator()
     }
 }
 

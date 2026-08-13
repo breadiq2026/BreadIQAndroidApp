@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Simple placeholder monogram ("B") in BreadIQ's accent orange on a
+     transparent layer, per the adaptive icon spec. Swap for real launcher
+     artwork before shipping — this is just enough to make the app
+     installable/identifiable during development. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M38,30 h20 a14,14 0 0 1 0,28 h-20 z M38,58 h22 a14,14 0 0 1 0,28 h-22 z" />
+</vector>

@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources xmlns:tools="http://schemas.android.com/tools">
+    <!-- Base application theme — the actual color scheme is applied in
+         Compose via BreadIQTheme (see ui/theme/Theme.kt). This XML theme
+         only needs to cover the system splash/launch background before
+         Compose takes over. -->
+    <style name="Theme.BreadIQ" parent="android:Theme.Material.Light.NoActionBar" />
+</resources>

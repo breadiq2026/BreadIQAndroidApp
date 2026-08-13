@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Placeholder — revisit once local persistence (Room, matching iOS's
+     SwiftData store) is in place, to make sure auth tokens / sensitive
+     local data are excluded from auto-backup. -->
+<full-backup-content>
+</full-backup-content>

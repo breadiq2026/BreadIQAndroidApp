@@ -2,6 +2,7 @@ package com.BreadIQ.myapp.model
 
 import java.time.Instant
 import java.util.UUID
+import kotlinx.serialization.Serializable
 
 /**
  * Ported from the iOS app's `Models/QueuedBake.swift`.
@@ -9,7 +10,12 @@ import java.util.UUID
  * A single step's static plan info within a queued (not-yet-started) bake —
  * just label/description/duration, no live timer/status fields (those only
  * exist once a bake is promoted to a running [BakeSession]).
+ *
+ * `@Serializable` — see [FlourBlendEntry]'s own doc comment; same reason
+ * (Room's `QueuedBakeEntity` TypeConverter JSON-encodes the plan list into
+ * one column).
  */
+@Serializable
 data class QueuedBakeStepPlan(
     val label: String,
     val description: String,

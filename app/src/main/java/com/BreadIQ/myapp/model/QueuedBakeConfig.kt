@@ -1,10 +1,20 @@
 package com.BreadIQ.myapp.model
 
+import kotlinx.serialization.Serializable
+
 /**
  * Ported from the iOS app's `Models/QueuedBakeConfig.swift`.
  *
  * One flour's share of a blend, e.g. `{ type: "bread", percent: 80 }`.
+ *
+ * `@Serializable` — added for PORTING_PLAN.md step 5: Room's
+ * `QueuedBakeConfigEntity`/`RecipeEntity` TypeConverters JSON-encode a
+ * flour blend into a single column via kotlinx.serialization, the same
+ * way SwiftData transparently serializes a `Codable` array into its own
+ * column. Not needed by anything before Room; harmless for every other
+ * existing use of this type.
  */
+@Serializable
 data class FlourBlendEntry(
     val type: String,
     val percent: Double,

@@ -2,6 +2,8 @@ plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.android)
     alias(libs.plugins.kotlin.compose)
+    alias(libs.plugins.kotlin.serialization)
+    alias(libs.plugins.ksp)
 }
 
 android {
@@ -22,6 +24,15 @@ android {
         // BreadIQ is portrait-only on iOS for iPhone; matched here via the
         // MainActivity manifest entry (screenOrientation="portrait") rather
         // than here.
+
+        // Room schema export (PORTING_PLAN.md step 5) — writes a JSON
+        // snapshot of the schema per DB version to app/schemas/, needed to
+        // write real migrations later and to unit-test them. The classic
+        // KSP-arg form rather than the newer dedicated `androidx.room`
+        // Gradle plugin — one fewer plugin to wire up for the same result.
+        ksp {
+            arg("room.schemaLocation", "$projectDir/schemas")
+        }
     }
 
     buildTypes {
@@ -66,11 +77,18 @@ dependencies {
     implementation(libs.supabase.auth)
     implementation(libs.supabase.postgrest)
     implementation(libs.ktor.client.android)
-    // For decoding supabase-kt's own @Serializable types (e.g. UserSession
-    // in KeystoreSessionManager) — not for any of our own DTOs yet, so the
-    // kotlin("plugin.serialization") compiler plugin isn't needed until
-    // this app defines its own @Serializable classes.
+    // Originally added just for decoding supabase-kt's own @Serializable
+    // types (e.g. UserSession in KeystoreSessionManager). Now also used by
+    // Room's TypeConverters (below) to JSON-encode this app's own small
+    // value types (FlourBlendEntry, QueuedBakeStepPlan) — see the
+    // kotlin.plugin.serialization entry above, added for that reason.
     implementation(libs.kotlinx.serialization.json)
+
+    // Room (local persistence, PORTING_PLAN.md step 5) — the Android
+    // equivalent of SwiftData. room-ktx for Flow/suspend DAO support.
+    implementation(libs.androidx.room.runtime)
+    implementation(libs.androidx.room.ktx)
+    ksp(libs.androidx.room.compiler)
 
     testImplementation(libs.junit)
     androidTestImplementation(libs.androidx.junit)

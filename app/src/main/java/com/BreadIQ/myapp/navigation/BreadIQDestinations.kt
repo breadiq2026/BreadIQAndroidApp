@@ -37,4 +37,15 @@ object BreadIQRoutes {
     const val INGREDIENT_COSTS = "ingredient_costs"
     const val CONNECT_BROWSER = "connect_browser"
     const val SUBSCRIPTION = "subscription"
+
+    /**
+     * Pushed from Calculator's Card 4 results section. Both read their
+     * data from the SAME [com.BreadIQ.myapp.viewmodel.CalculatorViewModel]
+     * instance as the Calculator route itself (scoped to that back stack
+     * entry) rather than passing `FormulaResult`/`AutolyseGuidance`
+     * through route arguments — Compose Navigation's standard pattern for
+     * sharing state across a screen and the detail screens it pushes.
+     */
+    const val NUTRITION_ANALYSIS = "nutrition_analysis"
+    const val AUTOLYSE_GUIDANCE = "autolyse_guidance"
 }

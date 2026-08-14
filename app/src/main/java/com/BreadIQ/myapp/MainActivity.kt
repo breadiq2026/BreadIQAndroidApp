@@ -17,7 +17,10 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.runtime.remember
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.NavDestination.Companion.hierarchy
 import androidx.navigation.NavGraph.Companion.findStartDestination
 import androidx.navigation.compose.NavHost
@@ -25,15 +28,22 @@ import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import com.BreadIQ.myapp.navigation.BreadIQDestination
+import com.BreadIQ.myapp.navigation.BreadIQRoutes
 import com.BreadIQ.myapp.screens.AuthScreen
-import com.BreadIQ.myapp.screens.CalculatorScreen
 import com.BreadIQ.myapp.screens.CurrentBakeScreen
 import com.BreadIQ.myapp.screens.LexiconScreen
 import com.BreadIQ.myapp.screens.QueueScreen
 import com.BreadIQ.myapp.screens.RecipesScreen
+import com.BreadIQ.myapp.ui.calculator.AutolyseGuidanceScreen
+import com.BreadIQ.myapp.ui.calculator.CalculatorScreen
+import com.BreadIQ.myapp.ui.calculator.NutritionAnalysisScreen
 import com.BreadIQ.myapp.ui.theme.BreadIQTheme
 import com.BreadIQ.myapp.viewmodel.AuthViewModel
 import com.BreadIQ.myapp.viewmodel.AuthViewModelFactory
+import com.BreadIQ.myapp.viewmodel.CalculatorViewModel
+import com.BreadIQ.myapp.viewmodel.CalculatorViewModelFactory
+import com.BreadIQ.myapp.viewmodel.autolyseGuidance
+import com.BreadIQ.myapp.viewmodel.selectedShape
 
 /**
  * Entry point / replaces `RootView.swift` + `MainTabView.swift`. Hosts
@@ -115,7 +125,41 @@ fun BreadIQApp() {
             startDestination = BreadIQDestination.CALCULATOR.route,
             modifier = Modifier.padding(innerPadding)
         ) {
-            composable(BreadIQDestination.CALCULATOR.route) { CalculatorScreen() }
+            composable(BreadIQDestination.CALCULATOR.route) {
+                val context = LocalContext.current
+                val calculatorViewModel: CalculatorViewModel = viewModel(factory = CalculatorViewModelFactory(context))
+                CalculatorScreen(
+                    viewModel = calculatorViewModel,
+                    onOpenNutrition = { navController.navigate(BreadIQRoutes.NUTRITION_ANALYSIS) },
+                    onOpenAutolyse = { navController.navigate(BreadIQRoutes.AUTOLYSE_GUIDANCE) },
+                )
+            }
+            // Both detail screens below read from the SAME CalculatorViewModel
+            // instance as the Calculator route (scoped to that back stack
+            // entry) rather than passing FormulaResult/AutolyseGuidance through
+            // route arguments — see BreadIQRoutes' own doc comment.
+            composable(BreadIQRoutes.NUTRITION_ANALYSIS) {
+                val context = LocalContext.current
+                val parentEntry = remember { navController.getBackStackEntry(BreadIQDestination.CALCULATOR.route) }
+                val calculatorViewModel: CalculatorViewModel = viewModel(parentEntry, factory = CalculatorViewModelFactory(context))
+                val state by calculatorViewModel.uiState.collectAsStateWithLifecycle()
+                state.formulaResult?.let { formulaResult ->
+                    NutritionAnalysisScreen(
+                        result = formulaResult, styleValue = state.selectedStyle.value, styleLabel = state.selectedStyle.label,
+                        yeastType = state.yeastType, sweetenerType = state.sweetenerType, blend = state.flourBlend,
+                        shapeValue = state.selectedShapeValue, shapeLabel = state.selectedShape?.label ?: state.selectedShapeValue,
+                        numLoaves = state.numLoaves.toInt(),
+                        onDismiss = { navController.popBackStack() },
+                    )
+                }
+            }
+            composable(BreadIQRoutes.AUTOLYSE_GUIDANCE) {
+                val context = LocalContext.current
+                val parentEntry = remember { navController.getBackStackEntry(BreadIQDestination.CALCULATOR.route) }
+                val calculatorViewModel: CalculatorViewModel = viewModel(parentEntry, factory = CalculatorViewModelFactory(context))
+                val state by calculatorViewModel.uiState.collectAsStateWithLifecycle()
+                AutolyseGuidanceScreen(guidance = state.autolyseGuidance, onDismiss = { navController.popBackStack() })
+            }
             composable(BreadIQDestination.RECIPES.route) { RecipesScreen() }
             composable(BreadIQDestination.LEXICON.route) { LexiconScreen() }
             composable(BreadIQDestination.QUEUE.route) { QueueScreen() }

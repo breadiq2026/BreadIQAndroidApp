@@ -70,6 +70,8 @@ import com.BreadIQ.myapp.viewmodel.CalculatorViewModelFactory
 fun CalculatorScreen(
     modifier: Modifier = Modifier,
     viewModel: CalculatorViewModel = viewModel(factory = CalculatorViewModelFactory(LocalContext.current)),
+    onOpenNutrition: () -> Unit = {},
+    onOpenAutolyse: () -> Unit = {},
 ) {
     val state by viewModel.uiState.collectAsState()
     val colors = LocalBreadIQColors.current
@@ -100,7 +102,7 @@ fun CalculatorScreen(
                 1 -> CardFlourAndFormula(state = state, viewModel = viewModel)
                 2 -> CardFermentation(state = state, viewModel = viewModel)
                 3 -> CardEnvironment(state = state, viewModel = viewModel)
-                else -> CardCalculateResults(state = state, viewModel = viewModel)
+                else -> CardCalculateResults(state = state, viewModel = viewModel, onOpenNutrition = onOpenNutrition, onOpenAutolyse = onOpenAutolyse)
             }
         }
 

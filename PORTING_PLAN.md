@@ -51,7 +51,7 @@ Mirrors `iosBreadIQapp/ROADMAP.md`'s own sequencing logic (foundational/offline-
    Wired session gating into `MainActivity`, replacing the previously-unconditional tab shell: a loading spinner while `AuthViewModel`'s initial session check is in flight, `AuthScreen` when there's no session, the tab shell when there is — matching `RootView.swift`'s three-state split. Deliberately narrower than the full `RootView.swift`, which this same split sits inside of on iOS: no password-recovery branch (see step 2's note above), no bake-session reconciliation or subscription-store login/logout binding (both depend on features — `BakeSessionEngine`, `SubscriptionStore` — that don't exist on Android yet either).
 
    Added the `INTERNET` permission to `AndroidManifest.xml` — Supabase Auth calls are the app's first real network traffic; nothing needed it before this step.
-4. **Core calculators** — ✅ done 2026-08-13. `FormulaCalculator.swift`, `ProofTimeCalculator.swift`, `AutolyseCalculator.swift`, `NutritionCalculator.swift`, `CostEstimator.swift` are pure logic with no UIKit/SwiftUI dependency — the most mechanical part of the port so far. These plus `Models/BreadStyleDef.swift` and `Models/TechniqueGuideCatalog.swift` (large static data tables) unblock the Calculator tab, which is the app's primary screen (`CalculatorScreen.swift` is the largest file in the iOS app at ~140KB) — still not ported itself; that's the next step.
+4. **Core calculators** — ✅ done 2026-08-13. `FormulaCalculator.swift`, `ProofTimeCalculator.swift`, `AutolyseCalculator.swift`, `NutritionCalculator.swift`, `CostEstimator.swift` are pure logic with no UIKit/SwiftUI dependency — the most mechanical part of the port so far. These plus `Models/BreadStyleDef.swift` and `Models/TechniqueGuideCatalog.swift` (large static data tables) unblock the Calculator tab, which is the app's primary screen (`CalculatorScreen.swift` is the largest file in the iOS app at ~140KB) — ported itself as its own later step, see the "Execution sequence" section below.
 
    **Data half done first** (the calculators read `BreadStyleCatalog`), its own commit: ported `Models/BreadStyleDef.swift` → `model/BreadStyleDef.kt` (`NumericRange`, `BreadStyleDef`, `BreadStyleCatalog` — all 12 styles, transcribed exactly) and `Models/TechniqueGuideCatalog.swift` → `model/TechniqueGuideCatalog.kt` (all 6 catalogs — `kneading`/`proofingGeneral` at 13 entries each, `shapingByShape`/`baking` at 7 each, `shapingByStyle`/`bakingByStyle` at 10 each — reusing the `TechniqueSection`/`BakingSection` types already ported in step 1, no new model types needed). Every entry preserved verbatim, including the pre-existing `whole_wheat` gap noted in both source files' own comments (present in the technique catalogs, absent from `BreadStyleCatalog` itself — not something to silently fix here).
 
@@ -125,8 +125,74 @@ Concrete order:
 
 1. **Room persistence** (step 5) -- ✅ done 2026-08-14. Foundational, unblocks everything below. Full writeup under step 5 above.
 2. **Calculator screen** (`Screens/CalculatorScreen.swift`, ~140KB -- the
-   single largest file in the app). Logic is ready from step 4; likely needs
-   2-3 commits given size, same pattern as step 4.
+   single largest file in the app) -- ✅ done 2026-08-14, across 9 commits
+   (bigger than the 2-3 estimated, in line with step 4's own "needed more
+   commits than expected" precedent). Full 5-card wizard: live
+   calculation via the calculators/static data from step 4, results
+   display, Save Recipe + Queue for Later wired to the local Room DAOs
+   from step 5, and the "Start Over" reset flow.
+   - Shared UI infra new to this step: `ui/components/` (`Card`, `Badge`,
+     `BreadIQButton`) -- no shared component package existed before this;
+     established one now, kept general-purpose rather than
+     Calculator-specific. `ui/theme/Color.kt` grew a `BreadIQColorTokens`
+     interface + `LocalBreadIQColors` CompositionLocal so any composable
+     can read the full BreadIQ palette the way SwiftUI views read
+     `BreadIQColors.*` directly (Material3's `ColorScheme` only has slots
+     for a handful of these tokens).
+   - `core/TemperatureFormatting.kt`, `core/Haptics.kt` (reimplemented
+     over `Vibrator`/`VibrationEffect` -- no Android equivalent of
+     `UIImpactFeedbackGenerator` exists), `data/TemperatureUnitStore.kt`
+     (no Settings screen exists yet to call `setUnit()`, so it only ever
+     reads its Fahrenheit default this session).
+   - `core/ProofStageNarrator.kt` -- pulled forward from step 4 (the
+     bake-session-engine step below) after verifying it only depends on
+     `ProofTimeInput`/`ProofTimeMath`/`TemperatureFormatting`, not
+     `BakeSessionEngine`/`BakeStepAssembler`; approved directly
+     mid-session since Calculator's `calculate()` needs its stage prose
+     for the Proof Timeline card and Save Recipe's `proofMinutes` field.
+   - `ui/calculator/FormulaResultView.kt`, `CalculatorAtoms.kt`
+     (`CalcSectionLabel`/`CalcStepperRow`/`CalcChipRow`/`CalcSelectMenu`/
+     `CalcInfoBox`/etc. -- `FlowWrap` is Compose's now-stable built-in
+     `FlowRow` instead of a hand-rolled `Layout`), `CalculatorScreen.kt`
+     (header/footer/card-switch shell), `CalculatorCards.kt` (Cards 0-3),
+     `CalculatorResultsCard.kt` (Card 4 + `ProofTimelineCard`/
+     `BakingGuideCard`/`MixingGuideCard`), `AutolyseGuidanceScreen.kt`,
+     `NutritionAnalysisScreen.kt` -- the two user-selectable detail
+     screens, nav-pushed rather than sheet-presented, sharing the
+     Calculator route's own `CalculatorViewModel` instance (scoped to
+     that back stack entry) instead of passing `FormulaResult`/
+     `AutolyseGuidance` through route arguments.
+   - `model/BakeUserTier.kt` -- split out of `BakeSessionEngine.swift`
+     early since Calculator's tier gating needs it now; every tier read
+     defaults to `FREE` until step 6 (RevenueCat) lands a real
+     `SubscriptionStore` -- the correct fallback for "no subscription
+     info available," not a gap.
+   - `viewmodel/CalculatorViewModel.kt` -- one `StateFlow`-held
+     `CalculatorUiState` mirroring the source's full `@State` list
+     (`AuthViewModel`'s existing pattern), plus the ported action logic
+     (`selectStyle`, `resetToDefaults`, flour-blend mutation,
+     `calculate()`, `handleQueueBake()`, `handleSaveRecipe()`/
+     `handleUpdateRecipe()`).
+   - **Deferred, each rendered as a visibly disabled control rather than
+     omitted** (per direct instruction): Import (needs `RecipeScanner`
+     CameraX + ML Kit -- step 7), Settings gear (no `SettingsScreen` port
+     exists yet -- step 8), Schedule Bake (needs the bake-session engine
+     below, deferred regardless per direct instruction), Start Now (needs
+     `BakeSessionEngine`/`BakeStepAssembler` -- step 4 below), Share
+     Recipe (needs `RecipeXLSXExporter` -- step 7). Recipe backend sync
+     (`BackendRecipeSyncService`) is not wired either -- Save/Update
+     Recipe persist locally via Room only, matching this port's
+     established "local mutation is real today, sync layers on top
+     later" pattern.
+   - **A real, non-obvious bug caught while porting, not reproduced**:
+     both `AutolyseGuidanceScreen.swift` and `NutritionAnalysisScreen.swift`
+     wrap their top info card in `Card(...).background(amber).clipShape(...)`,
+     but `Card`'s own body already paints an opaque `BreadIQColors.card`
+     background as part of the view being modified, and SwiftUI's
+     `.background(_:)` places its argument BEHIND that already-opaque
+     view -- the amber fill can never actually show through. Confirmed
+     dead code in the source (traced through `Card.swift` directly), so
+     it's not reproduced in the Android port.
 3. **Recipes + Lexicon tabs** (`RecipesScreen.swift` ~24KB,
    `LexiconScreen.swift` ~16KB) -- smaller, lower risk, and Recipes exercises
    the new Room layer end-to-end before anything more complex depends on it.

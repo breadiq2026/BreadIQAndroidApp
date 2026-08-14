@@ -302,7 +302,64 @@ Concrete order:
      (`List<RawBakeStep>`, feeding straight into
      `BakeSessionEngine.startBake`) is locked in now.
 5. **Queue + Current Bake tabs** (`QueueScreen.swift`, `CurrentBakeScreen.swift`,
-   `BakeDetailScreen.swift`) -- unblocked by step 4 above.
+   `BakeDetailScreen.swift`, `ScheduleModal.swift`) -- ✅ done 2026-08-14,
+   4 commits. Wired last session's `BakeSessionEngine`/`BakeStepAssembler`
+   into real UI and closed the loop on Calculator's "Start Now"/
+   "Schedule Bake" buttons, which had rendered disabled since the
+   Calculator session.
+   - `core/BakeDetailFormatting.kt`, `core/ScheduledBakePlanner.kt`,
+     `core/ScheduleModalFormatting.kt`, `core/QueueFormatting.kt` --
+     the pure formatting/decision logic each screen leans on (countdown
+     text, arc progress/color state, schedule-window validity, etc.).
+   - `core/BakeNotificationScheduler.kt` -- every real call site across
+     Queue/Current Bake/Bake Detail (`afterStart`, `cancel`, `snapshot`,
+     `syncAfterMutation`, `cancelEverything`, ~a dozen sites) is wired
+     in, but each actual scheduling call is a stub/no-op naming the
+     dependency inline -- push notifications are still step 7, not done
+     yet. `snapshot` is the one real (pure) function ported, since it's
+     just data extraction.
+   - `ui/components/{BakeProgressArc,BakeCard,ScheduledBakeCard,
+     BakeStepRow}.kt` -- shared bake UI atoms, alongside `Card`/`Badge`/
+     `BreadIQButton` from the Calculator session rather than
+     screen-local. `BakeStepRow` has zero real call sites in either
+     codebase but is ported anyway, matching the iOS port's own
+     precedent of building it despite that.
+   - `viewmodel/QueueViewModel.kt` + `ui/queue/QueueScreen.kt` --
+     observes `QueuedBakeDao`/`BakeSessionDao` live; "Start Now" uses
+     the bake's already-stored `QueuedBakeStepPlan` list directly (not
+     reassembled through `BakeStepAssembler`) -- a genuine two-tier
+     step-richness distinction the source itself makes, preserved as-is.
+   - `viewmodel/CurrentBakeViewModel.kt` + `ui/currentbake/CurrentBakeScreen.kt`
+     -- Scheduled/In Progress/Completed sections; `removeScheduled` is a
+     single `ScheduledBakeDao.deleteById` relying on Room's declarative
+     `ON DELETE CASCADE`, replacing the source's explicit leaf-first
+     delete order (a SwiftData-crash workaround that Room doesn't need --
+     write-up in the ViewModel's own doc comment).
+   - `viewmodel/BakeDetailViewModel.kt` + `ui/bakedetail/BakeDetailScreen.kt`
+     -- the largest file this session; live 1s-ticking timer/arc UI,
+     step advance/pause/resume/extend, early-completion confirm,
+     collapsible timeline. `session` is derived from the same
+     `BakeSessionDao.observeAll()` query every other bake screen uses
+     (filtered by id), mirroring the source's own `@Query` +
+     `.first { }` pattern rather than a separate single-row query.
+   - `viewmodel/ScheduleViewModel.kt` + `ui/schedule/ScheduleScreen.kt`
+     -- real scheduling data-entry/validation UI; calendar event
+     creation stays stubbed per direct instruction (`ScheduleModal.swift`'s
+     own doc comment already flags it as a later phase). The picker is a
+     Material3 `DatePicker`+`TimePicker` dialog rather than a direct
+     port of SwiftUI's single inline `DatePicker(.graphical)`, since
+     Compose has no equivalent combined widget. The source's two-step
+     "Scheduled -- Open Calendar?" post-save flow is simplified to one
+     "OK" confirmation shown directly by this screen, since the SwiftUI
+     `.sheet`+`.alert` dismissal-timing bug it works around doesn't
+     apply to a normal Compose nav destination.
+   - `CalculatorViewModel.handleStartBake()`/`buildBakePlan()` and
+     `CalculatorResultsCard.kt`'s "Start Now"/"Schedule Bake" buttons
+     are now live instead of disabled. `MainActivity.kt`'s `NavHost`
+     gained real Queue/Current Bake screens (replacing their
+     `PlaceholderScreen` stand-ins, now deleted) plus the pushed Bake
+     Detail and Schedule routes, and a `pendingSchedulePlan` handoff
+     value mirroring the existing `pendingRecipeId` pattern.
 6. **RevenueCat + Subscription screen** (`RevenueCatPurchasesService.swift`,
    `RevenueCatTierResolution.swift`, `SubscriptionStore.swift`,
    `SubscriptionScreen.swift`) -- independent vertical, slotted here so

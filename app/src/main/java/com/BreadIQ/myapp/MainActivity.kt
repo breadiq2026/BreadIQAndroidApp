@@ -26,20 +26,25 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.NavDestination.Companion.hierarchy
 import androidx.navigation.NavGraph.Companion.findStartDestination
+import androidx.navigation.NavType
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
+import androidx.navigation.navArgument
+import com.BreadIQ.myapp.core.RawScheduledBakePlan
 import com.BreadIQ.myapp.navigation.BreadIQDestination
 import com.BreadIQ.myapp.navigation.BreadIQRoutes
 import com.BreadIQ.myapp.screens.AuthScreen
-import com.BreadIQ.myapp.screens.CurrentBakeScreen
-import com.BreadIQ.myapp.screens.QueueScreen
+import com.BreadIQ.myapp.ui.bakedetail.BakeDetailScreen
 import com.BreadIQ.myapp.ui.calculator.AutolyseGuidanceScreen
 import com.BreadIQ.myapp.ui.calculator.CalculatorScreen
 import com.BreadIQ.myapp.ui.calculator.NutritionAnalysisScreen
+import com.BreadIQ.myapp.ui.currentbake.CurrentBakeScreen
 import com.BreadIQ.myapp.ui.lexicon.LexiconScreen
+import com.BreadIQ.myapp.ui.queue.QueueScreen
 import com.BreadIQ.myapp.ui.recipes.RecipesScreen
+import com.BreadIQ.myapp.ui.schedule.ScheduleScreen
 import com.BreadIQ.myapp.ui.theme.BreadIQTheme
 import com.BreadIQ.myapp.viewmodel.AuthViewModel
 import com.BreadIQ.myapp.viewmodel.AuthViewModelFactory
@@ -50,8 +55,9 @@ import com.BreadIQ.myapp.viewmodel.selectedShape
 
 /**
  * Entry point / replaces `RootView.swift` + `MainTabView.swift`. Hosts
- * the 5-tab bottom navigation shell; each tab body is a placeholder
- * pending its own porting pass (see PORTING_PLAN.md).
+ * the 5-tab bottom navigation shell — all five tabs (Calculator,
+ * Recipes, Lexicon, Queue, Current Bake) are now real, plus the pushed
+ * Bake Detail and Schedule destinations (see PORTING_PLAN.md).
  *
  * **Auth-gating now wired up** (PORTING_PLAN.md step 3), matching
  * `RootView.swift`'s three-state split — loading / signed-out /
@@ -107,6 +113,12 @@ fun BreadIQApp() {
     // own doc comment for the consumption side.
     var pendingRecipeId by remember { mutableStateOf<Int?>(null) }
 
+    // Calculator's "Schedule Bake" / Current Bake's "Reschedule" handoff
+    // to the Schedule route — same shape as pendingRecipeId above, just
+    // carrying a RawScheduledBakePlan instead of a recipe id. Consumed
+    // once by the Schedule route's own composable body below.
+    var pendingSchedulePlan by remember { mutableStateOf<RawScheduledBakePlan?>(null) }
+
     Scaffold(
         bottomBar = {
             NavigationBar {
@@ -149,6 +161,11 @@ fun BreadIQApp() {
                     viewModel = calculatorViewModel,
                     onOpenNutrition = { navController.navigate(BreadIQRoutes.NUTRITION_ANALYSIS) },
                     onOpenAutolyse = { navController.navigate(BreadIQRoutes.AUTOLYSE_GUIDANCE) },
+                    onStartedBake = { sessionId -> navController.navigate("bake_detail/$sessionId") },
+                    onScheduleBake = { plan ->
+                        pendingSchedulePlan = plan
+                        navController.navigate(BreadIQRoutes.SCHEDULE)
+                    },
                 )
             }
             // Both detail screens below read from the SAME CalculatorViewModel
@@ -190,8 +207,50 @@ fun BreadIQApp() {
                 )
             }
             composable(BreadIQDestination.LEXICON.route) { LexiconScreen() }
-            composable(BreadIQDestination.QUEUE.route) { QueueScreen() }
-            composable(BreadIQDestination.CURRENT_BAKE.route) { CurrentBakeScreen() }
+            composable(BreadIQDestination.QUEUE.route) {
+                QueueScreen(
+                    onStartedBake = { sessionId -> navController.navigate("bake_detail/$sessionId") },
+                )
+            }
+            composable(BreadIQDestination.CURRENT_BAKE.route) {
+                CurrentBakeScreen(
+                    onOpenBakeDetail = { sessionId -> navController.navigate("bake_detail/$sessionId") },
+                    onReschedule = { plan ->
+                        pendingSchedulePlan = plan
+                        navController.navigate(BreadIQRoutes.SCHEDULE)
+                    },
+                )
+            }
+            composable(
+                route = BreadIQRoutes.BAKE_DETAIL,
+                arguments = listOf(navArgument("sessionId") { type = NavType.StringType }),
+            ) { backStackEntry ->
+                val sessionId = backStackEntry.arguments?.getString("sessionId") ?: return@composable
+                BakeDetailScreen(
+                    sessionId = sessionId,
+                    onDismiss = { navController.popBackStack() },
+                )
+            }
+            composable(BreadIQRoutes.SCHEDULE) {
+                val plan = pendingSchedulePlan
+                if (plan == null) {
+                    // Route was reached without a plan handed off (e.g. process
+                    // restore) — nothing to schedule, bounce back immediately.
+                    LaunchedEffect(Unit) { navController.popBackStack() }
+                } else {
+                    ScheduleScreen(
+                        plan = plan,
+                        onCancel = {
+                            pendingSchedulePlan = null
+                            navController.popBackStack()
+                        },
+                        onScheduled = {
+                            pendingSchedulePlan = null
+                            navController.popBackStack()
+                        },
+                    )
+                }
+            }
         }
     }
 }

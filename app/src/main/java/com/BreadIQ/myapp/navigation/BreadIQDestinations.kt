@@ -48,4 +48,15 @@ object BreadIQRoutes {
      */
     const val NUTRITION_ANALYSIS = "nutrition_analysis"
     const val AUTOLYSE_GUIDANCE = "autolyse_guidance"
+
+    /**
+     * Pushed from Calculator's "Schedule Bake" button and Current Bake's
+     * "Reschedule" action. Takes no route argument — the
+     * [com.BreadIQ.myapp.core.RawScheduledBakePlan] being scheduled is
+     * handed off via the `pendingSchedulePlan` remembered value at
+     * `BreadIQApp()`'s scope, the same pattern `pendingRecipeId` uses for
+     * Recipes → Calculator, rather than serialized into the route (it
+     * isn't primitive/parcelable-simple).
+     */
+    const val SCHEDULE = "schedule"
 }

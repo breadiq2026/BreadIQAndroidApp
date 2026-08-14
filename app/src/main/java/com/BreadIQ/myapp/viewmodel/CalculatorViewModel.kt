@@ -554,6 +554,75 @@ class CalculatorViewModel(
     }
 
     /**
+     * "Load into Calculator" — new, no iOS source precedent. The iOS
+     * app's own `RecipesScreen.swift` sets `AppRouter.pendingRecipe` and
+     * switches tabs, but `CalculatorScreen.swift` never actually reads
+     * `pendingRecipe` anywhere (confirmed by grepping the whole file) —
+     * a real, unfinished handoff in the source itself, not just a gap in
+     * this port. This is the missing consumption side, built fresh for
+     * this port since there's nothing to transcribe.
+     *
+     * Approved directly: populates every field [Recipe] actually stores,
+     * then immediately calls [calculate] and jumps to Card 4 so the user
+     * sees the same formula the recipe was saved with right away, rather
+     * than landing on a blank Card 0 that requires paging through and
+     * tapping Calculate manually.
+     *
+     * Baker's percentages [Recipe] doesn't store directly (salt,
+     * sweetener, pre-ferment flour/hydration) are recovered from its
+     * stored gram weights — the inverse of [buildRecipe]'s own
+     * weight-from-percentage math. Fields [Recipe] never stores at all
+     * (egg/milk/butter percentages, malt, SpeedRun, cold-retard duration/
+     * temp, water/kitchen/final-proof temps, pretzel bath type) are left
+     * at whatever [selectStyle] resets them to for the matched style —
+     * the same "recipe doesn't retain everything" limitation the source
+     * schema already has, not something this port introduces.
+     */
+    fun loadFromRecipe(recipeId: Int) {
+        viewModelScope.launch {
+            val recipe = recipeDao.getById(recipeId)?.toDomain() ?: return@launch
+
+            val style = BreadStyleCatalog.all.firstOrNull { it.value == recipe.loafStyle } ?: BreadStyleCatalog.all[0]
+            selectStyle(style)
+
+            fun pctOf(weight: Double?, base: Double): Double? {
+                if (weight == null || base <= 0) return null
+                return (weight / base * 100 * 10).swiftRounded() / 10
+            }
+
+            update { s ->
+                val flourWeight = recipe.flourWeight
+                s.copy(
+                    selectedShapeValue = recipe.loafShape ?: s.selectedShapeValue,
+                    numLoaves = recipe.numLoaves.toDouble(),
+                    hydration = recipe.hydrationPercent,
+                    fat = recipe.fatPercent,
+                    salt = pctOf(recipe.saltWeight, flourWeight) ?: s.salt,
+                    yeast = recipe.yeastPercent,
+                    yeastType = recipe.yeastType ?: s.yeastType,
+                    flourBlend = recipe.flourBlend?.takeIf { it.isNotEmpty() } ?: s.flourBlend,
+                    sweetenerType = recipe.sweetenerType,
+                    sweetenerPct = pctOf(recipe.sweetenerWeight, flourWeight) ?: s.sweetenerPct,
+                    usePrefermant = recipe.preFermentType != null,
+                    prefermentType = recipe.preFermentType ?: s.prefermentType,
+                    prefermentFlourPct = pctOf(recipe.preFermentFlourWeight, flourWeight) ?: s.prefermentFlourPct,
+                    prefermentHydration = pctOf(recipe.preFermentWaterWeight, recipe.preFermentFlourWeight ?: 0.0) ?: s.prefermentHydration,
+                    useColdRetard = recipe.fermentationType == "cold",
+                    isHumidityMode = recipe.humidityAdjusted,
+                    relativeHumidity = recipe.humidityRh?.toDouble() ?: s.relativeHumidity,
+                    recipeName = "",
+                    savedId = null,
+                    loadedFromRecipeId = recipe.id,
+                    loadedFromRecipeName = recipe.name,
+                    cardIndex = 4,
+                )
+            }
+
+            calculate()
+        }
+    }
+
+    /**
      * Builds the [QueuedBake] the current calculator state would queue —
      * matches the iOS source's `currentQueuedBakePlan()`, minus the
      * `RawScheduledBakePlan` wrapper that exists there only to feed the

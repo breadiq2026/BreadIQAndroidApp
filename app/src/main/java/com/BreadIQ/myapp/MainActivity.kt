@@ -14,11 +14,14 @@ import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.runtime.remember
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.NavDestination.Companion.hierarchy
@@ -31,12 +34,12 @@ import com.BreadIQ.myapp.navigation.BreadIQDestination
 import com.BreadIQ.myapp.navigation.BreadIQRoutes
 import com.BreadIQ.myapp.screens.AuthScreen
 import com.BreadIQ.myapp.screens.CurrentBakeScreen
-import com.BreadIQ.myapp.screens.LexiconScreen
 import com.BreadIQ.myapp.screens.QueueScreen
-import com.BreadIQ.myapp.screens.RecipesScreen
 import com.BreadIQ.myapp.ui.calculator.AutolyseGuidanceScreen
 import com.BreadIQ.myapp.ui.calculator.CalculatorScreen
 import com.BreadIQ.myapp.ui.calculator.NutritionAnalysisScreen
+import com.BreadIQ.myapp.ui.lexicon.LexiconScreen
+import com.BreadIQ.myapp.ui.recipes.RecipesScreen
 import com.BreadIQ.myapp.ui.theme.BreadIQTheme
 import com.BreadIQ.myapp.viewmodel.AuthViewModel
 import com.BreadIQ.myapp.viewmodel.AuthViewModelFactory
@@ -95,6 +98,15 @@ private fun LoadingScreen() {
 fun BreadIQApp() {
     val navController = rememberNavController()
 
+    // Recipes' "Load into Calculator" handoff — the Compose counterpart
+    // of AppRouter.pendingRecipe (set alongside a tab switch, consumed
+    // and cleared by the Calculator route once). A plain remembered
+    // value at this shared composable scope rather than a new app-wide
+    // router class, since this is the only cross-tab handoff that
+    // exists on Android so far — see CalculatorViewModel.loadFromRecipe's
+    // own doc comment for the consumption side.
+    var pendingRecipeId by remember { mutableStateOf<Int?>(null) }
+
     Scaffold(
         bottomBar = {
             NavigationBar {
@@ -128,6 +140,11 @@ fun BreadIQApp() {
             composable(BreadIQDestination.CALCULATOR.route) {
                 val context = LocalContext.current
                 val calculatorViewModel: CalculatorViewModel = viewModel(factory = CalculatorViewModelFactory(context))
+                LaunchedEffect(pendingRecipeId) {
+                    val id = pendingRecipeId ?: return@LaunchedEffect
+                    calculatorViewModel.loadFromRecipe(id)
+                    pendingRecipeId = null
+                }
                 CalculatorScreen(
                     viewModel = calculatorViewModel,
                     onOpenNutrition = { navController.navigate(BreadIQRoutes.NUTRITION_ANALYSIS) },
@@ -160,7 +177,18 @@ fun BreadIQApp() {
                 val state by calculatorViewModel.uiState.collectAsStateWithLifecycle()
                 AutolyseGuidanceScreen(guidance = state.autolyseGuidance, onDismiss = { navController.popBackStack() })
             }
-            composable(BreadIQDestination.RECIPES.route) { RecipesScreen() }
+            composable(BreadIQDestination.RECIPES.route) {
+                RecipesScreen(
+                    onLoadIntoCalculator = { recipeId ->
+                        pendingRecipeId = recipeId
+                        navController.navigate(BreadIQDestination.CALCULATOR.route) {
+                            popUpTo(navController.graph.findStartDestination().id) { saveState = true }
+                            launchSingleTop = true
+                            restoreState = true
+                        }
+                    },
+                )
+            }
             composable(BreadIQDestination.LEXICON.route) { LexiconScreen() }
             composable(BreadIQDestination.QUEUE.route) { QueueScreen() }
             composable(BreadIQDestination.CURRENT_BAKE.route) { CurrentBakeScreen() }

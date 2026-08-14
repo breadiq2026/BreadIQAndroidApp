@@ -194,8 +194,49 @@ Concrete order:
      dead code in the source (traced through `Card.swift` directly), so
      it's not reproduced in the Android port.
 3. **Recipes + Lexicon tabs** (`RecipesScreen.swift` ~24KB,
-   `LexiconScreen.swift` ~16KB) -- smaller, lower risk, and Recipes exercises
-   the new Room layer end-to-end before anything more complex depends on it.
+   `LexiconScreen.swift` ~16KB) -- ✅ done 2026-08-14, 2 commits. Much
+   smaller than steps 2/4 (955 iOS lines combined), as expected.
+   - `ui/lexicon/LexiconScreen.kt` -- pure browser over the static
+     `LexiconCatalog` from step 1, no persistence. `LexiconSection`/
+     `LexiconSearch` ported as pure functions. Category-pill <->
+     scroll-position sync reworked for Compose rather than
+     transliterated: the source measures section-header positions via a
+     `GeometryReader`-backed `PreferenceKey` (a SwiftUI-specific
+     workaround); this reads `LazyListState.layoutInfo.visibleItemsInfo`
+     directly instead, the same "last header scrolled to or past the
+     top edge" rule. The source's dead `pillScrollRef` (declared, never
+     used to auto-scroll) is correctly not reproduced.
+   - `viewmodel/RecipesViewModel.kt` + `ui/recipes/RecipesScreen.kt` --
+     live `RecipeDao.observeAll()` list (sorted by `createdAt`
+     descending), recipe card with stat pills, detail bottom sheet
+     (formula/weights/flour-blend/pre-ferment/fermentation/notes
+     sections, real delete via `RecipeDao.deleteById` with a
+     confirmation dialog). Backend sync (`BackendRecipeSyncService`)
+     stays a real, callable no-op, same deferral as Save Recipe's
+     backend half from step 2.
+   - **A real, unfinished handoff found in the iOS source, not just a
+     gap in this port**: `RecipesScreen.swift`'s "Load into Calculator"
+     sets `AppRouter.pendingRecipe` and switches tabs, but
+     `CalculatorScreen.swift` never actually reads `pendingRecipe`
+     anywhere (confirmed by grepping the whole file) -- the iOS app
+     itself never finished wiring the consumption side. Built fresh for
+     this port since there was nothing to transcribe:
+     `CalculatorViewModel.loadFromRecipe(recipeId)` populates every
+     field `Recipe` stores (recovering baker's percentages Recipe
+     doesn't store directly -- salt, sweetener, pre-ferment flour/
+     hydration -- from its stored gram weights, the inverse of
+     `buildRecipe`'s own math), then auto-calculates and jumps to Card 4
+     (both approved directly, no iOS precedent to follow either way).
+     Fields `Recipe` never stores at all (egg/milk/butter %, malt,
+     SpeedRun, cold-retard duration/temp, proof-environment temps,
+     pretzel bath type) fall back to the matched style's own defaults --
+     a pre-existing `Recipe` schema limitation, not something this port
+     introduces. `MainActivity`'s `BreadIQApp()` composable carries the
+     handoff itself (`pendingRecipeId`, a plain remembered value set by
+     Recipes' `onLoadIntoCalculator` and consumed once by the Calculator
+     route) -- the Compose counterpart of `AppRouter.pendingRecipe`,
+     scoped to where it's actually needed rather than a new app-wide
+     router class.
 4. **Bake session engine** (`BakeSessionEngine.swift` + `BakeStepAssembler.swift`
    + `ProofStageNarrator.swift`, ~94KB combined) -- the hardest remaining
    business logic, its own session so problems surface before Queue/Current

@@ -14,10 +14,11 @@ import androidx.compose.ui.unit.dp
 
 /**
  * Shared stand-in for each remaining tab screen until it's ported from
- * the iOS app's Screens directory (RecipesScreen.swift,
- * LexiconScreen.swift, QueueScreen.swift, CurrentBakeScreen.swift).
- * `CalculatorScreen` graduated out of this file — see
- * `ui/calculator/CalculatorScreen.kt`. See PORTING_PLAN.md for sequencing.
+ * the iOS app's Screens directory (QueueScreen.swift,
+ * CurrentBakeScreen.swift). `CalculatorScreen`, `RecipesScreen`, and
+ * `LexiconScreen` have all graduated out of this file — see
+ * `ui/calculator/CalculatorScreen.kt`, `ui/recipes/RecipesScreen.kt`,
+ * `ui/lexicon/LexiconScreen.kt`. See PORTING_PLAN.md for sequencing.
  */
 @Composable
 fun PlaceholderScreen(title: String, subtitle: String, modifier: Modifier = Modifier) {
@@ -38,14 +39,6 @@ fun PlaceholderScreen(title: String, subtitle: String, modifier: Modifier = Modi
         )
     }
 }
-
-@Composable
-fun RecipesScreen(modifier: Modifier = Modifier) =
-    PlaceholderScreen("Recipes", "Saved recipes — ports RecipesScreen.swift", modifier)
-
-@Composable
-fun LexiconScreen(modifier: Modifier = Modifier) =
-    PlaceholderScreen("Lexicon", "Baking term glossary — ports LexiconScreen.swift", modifier)
 
 @Composable
 fun QueueScreen(modifier: Modifier = Modifier) =

@@ -9,7 +9,7 @@ Native Android port of the [BreadIQ](https://breadiq.io) iOS app (`iosBreadIQapp
 
 ## Current state
 
-Not a feature-complete app yet, but auth is real: sign in/up/out against the live Supabase project, session-gated navigation, and a secure on-device session store (Android Keystore-backed). Once signed in, the app shows the 5-tab shell (Calculator, Recipes, Lexicon, Queue, Current Bake — matching the iOS tab order) with placeholder screens beyond Auth and the BreadIQ brand color palette (light + dark) ported from `BreadIQColors.swift`. No local persistence or real calculator/recipe/etc. content yet.
+Not a feature-complete app yet, but auth is real: sign in/up/out against the live Supabase project, session-gated navigation, and a secure on-device session store (Android Keystore-backed). Once signed in, the app shows the 5-tab shell (Calculator, Recipes, Lexicon, Queue, Current Bake — matching the iOS tab order) with placeholder screens beyond Auth and the BreadIQ brand color palette (light + dark) ported from `BreadIQColors.swift`. The Calculator tab's underlying math (formula, proof time, autolyse guidance, cost, nutrition) and static data (bread styles, technique guides) are fully ported in `core/`/`model/`, but not wired into a real screen yet — the tab body itself is still a placeholder. No local persistence yet either.
 
 ## Getting started
 
@@ -26,8 +26,8 @@ app/src/main/java/com/BreadIQ/myapp/
 ├── navigation/            # Tab + route definitions (replaces AppRouter.swift)
 ├── screens/                # One composable per screen (replaces Screens/*.swift) — AuthScreen is real, the 5 tabs are still placeholders
 ├── ui/theme/               # Colors ported from BreadIQColors.swift, Material3 theme
-├── core/                   # (empty) — business logic, calculators, services land here (replaces Core/*.swift)
-├── model/                  # Plain-value-type data models, ported from Models/*.swift — see PORTING_PLAN.md step 1
+├── core/                   # Formula/proof-time/autolyse/cost/nutrition calculators, ported from Core/*.swift — see PORTING_PLAN.md step 4
+├── model/                  # Plain-value-type data models, ported from Models/*.swift — see PORTING_PLAN.md steps 1 & 4
 ├── data/                   # Supabase client + auth service (SupabaseConfig, SupabaseClientProvider, KeystoreSessionManager, SupabaseAuthService, AuthErrorHumanizer) — see PORTING_PLAN.md step 2/3
 └── viewmodel/              # AuthViewModel (replaces Stores/AuthStore.swift)
 ```

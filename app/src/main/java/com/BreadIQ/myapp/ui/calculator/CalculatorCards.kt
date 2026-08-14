@@ -932,21 +932,13 @@ internal fun CardEnvironment(state: CalculatorUiState, viewModel: CalculatorView
     }
 }
 
-// MARK: - Card 4: Calculate / Results (own porting step — see CalculatorResultsCard.kt)
-
-@Composable
-internal fun CardCalculateResults(state: CalculatorUiState, viewModel: CalculatorViewModel) {
-    val colors = LocalBreadIQColors.current
-    Card(modifier = Modifier.fillMaxWidth()) {
-        Text(text = "Card 5 of 5 — Calculate & Results — coming in the next commit.", color = colors.mutedForeground)
-    }
-}
+// MARK: - Card 4: Calculate / Results — see CalculatorResultsCard.kt
 
 // MARK: - Small local helpers
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-private fun FlowChipGroup(content: @Composable () -> Unit) {
+internal fun FlowChipGroup(content: @Composable () -> Unit) {
     FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp), content = { content() })
 }
 

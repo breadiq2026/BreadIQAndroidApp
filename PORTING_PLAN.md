@@ -238,9 +238,69 @@ Concrete order:
      scoped to where it's actually needed rather than a new app-wide
      router class.
 4. **Bake session engine** (`BakeSessionEngine.swift` + `BakeStepAssembler.swift`
-   + `ProofStageNarrator.swift`, ~94KB combined) -- the hardest remaining
-   business logic, its own session so problems surface before Queue/Current
-   Bake assume a shape that turns out wrong.
+   + `ProofStageNarrator.swift`, ~94KB combined) -- ✅ done 2026-08-14
+   for the two remaining pieces, 2 commits (`ProofStageNarrator` was
+   already pulled forward into the Calculator session -- see step 2's
+   own writeup). Business logic only, no screens -- Queue/Current Bake
+   (step 5) are what actually call this.
+   - `core/BakeSessionEngine.kt` -- `RawBakeStep`, `BakeStartFailure`
+     (a `BakeStartResult` sealed class stands in for the source's
+     `Result<BakeSession, BakeStartFailure>`), and the state-machine
+     transitions: `startBake`, `advanceStep`, `pauseBake`, `resumeBake`,
+     `startStepTimer`, `extendStep`, `abandonBake`, and the wall-clock
+     catch-up function `reconcile`. `BakeUserTier` (already a stub from
+     the Calculator session) confirmed to match the source's
+     free/basic/premium cases exactly.
+
+     **API shape adapted for Kotlin, not transliterated**: the source
+     mutates a SwiftData `@Model` class in place; every transition here
+     instead takes a `BakeSession` and returns a NEW one via `.copy()`,
+     matching every other state holder in this app (`CalculatorUiState`,
+     `AuthUiState`, ...). `abandonBake` keeps the source's array-in/
+     array-out shape (the one function that already had it).
+
+     `reconcile` -- exactly the kind of function flagged as easy to
+     half-port going in -- carries forward two real bugs the iOS
+     source found in ITSELF and already fixed there (full write-up in
+     both the source's and this port's own doc comments): a cascade-
+     through-multiple-elapsed-steps fix (chaining `scheduledEndAt` off
+     the step that just "ended" instead of off `now`, so a session that
+     missed several steps' worth of wall-clock time while backgrounded
+     correctly cascades through all of them in one call instead of
+     stopping after one with a bogus fresh countdown), and a
+     `manualStart`-step-silently-auto-started fix (checking `noTimer ||
+     manualStart`, not `noTimer` alone, before auto-timing a newly-
+     activated step). This port implements the already-corrected logic
+     directly -- both fixes were already applied in the iOS source
+     itself, nothing further to find or fix here.
+
+     Actual notification scheduling stays out of scope (native-
+     integration territory, its own later porting item, matching the
+     source's own documented boundary) -- but the two pure decision
+     functions inside that scheduling code (`ovenPreheatFireTime`,
+     `wantsCoilFolds`/`coilFoldFireTimes`) are ported, since a future
+     scheduling step will need them and they're fully testable
+     independent of any notification API.
+   - `core/BakeStepContentLookup.kt` -- the behavior half of the
+     bake-step content system (`model/BakeStepContent.kt`, from step 1,
+     is the data half): `stepCompleteNotif`'s three-tier fallback,
+     `stepPrepNotif`'s Dutch-oven-styles special case,
+     `ovenPreheatNotif`, `stepDescription`'s exact-then-prefix fallback.
+   - `core/BakeStepAssembler.kt` -- turns a calculated formula + proof
+     result + style into the ordered `List<RawBakeStep>` a bake session
+     starts with (recipe-card text, ingredient-line breakdowns,
+     preferment-vs-straight-dough step splitting, per-style boil/bath/
+     mixing special-casing). Faithful to the source's own documented
+     one-offs rather than "corrected" -- two deliberately-separate label
+     tables confirmed as real drift from similarly-named tables
+     elsewhere in this port, the final-dough salt ingredient line
+     reading the top-level `formulaResult.saltWeight` instead of
+     `finalMix.saltWeight` (equal in practice, but the source's own
+     choice), and an unreachable-but-harmless multi-flour-without-a-
+     breakdown branch kept for source fidelity. This is what Queue/
+     Current Bake will call next session -- its output shape
+     (`List<RawBakeStep>`, feeding straight into
+     `BakeSessionEngine.startBake`) is locked in now.
 5. **Queue + Current Bake tabs** (`QueueScreen.swift`, `CurrentBakeScreen.swift`,
    `BakeDetailScreen.swift`) -- unblocked by step 4 above.
 6. **RevenueCat + Subscription screen** (`RevenueCatPurchasesService.swift`,

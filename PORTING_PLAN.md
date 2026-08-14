@@ -75,6 +75,68 @@ Mirrors `iosBreadIQapp/ROADMAP.md`'s own sequencing logic (foundational/offline-
    - XLSX export (`RecipeXLSXExporter.swift` + friends) → same file-format logic ports almost directly (it's manual XML/zip construction, not an iOS-only API); Storage Access Framework for the share/save step.
    - Safari extension / Chrome extension pairing-code import — Chrome extension already exists and is platform-agnostic on the backend side; the pairing-code redeem flow should work unchanged once Android has an authenticated Supabase session (step 2).
 
+## Execution sequence for steps 5-8 (refined 2026-08-14)
+
+Steps 5-8 above describe *what* remains; this section describes *what order to
+build it in and why*, worked out with Jeremy once the size/complexity of what
+was left became clearer after step 4. Two principles drove the resequencing:
+
+- **Dependency risk first.** Room (step 5) has to land before any more
+  screens are built, not after -- Recipes, Queue, and Current Bake are all
+  inherently persistence-backed (a queued bake or an active bake session has
+  to survive a process kill), so building them against throwaway in-memory
+  state first would mean rebuilding them once Room exists. The Calculator
+  screen doesn't have that problem (it's live computation over the
+  calculators from step 4), so it's unblocked either way. Likewise, Queue and
+  Current Bake can't be ported at all without the bake-session engine
+  (`BakeSessionEngine.swift` + `BakeStepAssembler.swift` +
+  `ProofStageNarrator.swift`) -- that needs its own session *before* those two
+  tabs, not bundled into "step 6."
+- **Right-size each handoff session.** Step 4 (2,595 iOS lines) already
+  needed 3 commits instead of 1. Step 8 as originally scoped bundles four
+  unrelated verticals (camera scan/import ~93KB across 4 files, notifications,
+  calendar, XLSX export ~55KB across 5 files) -- each gets its own session
+  below rather than trying to satisfy "step 8" in one pass.
+
+Concrete order:
+
+1. **Room persistence** (step 5) -- foundational, unblocks everything below.
+2. **Calculator screen** (`Screens/CalculatorScreen.swift`, ~140KB -- the
+   single largest file in the app). Logic is ready from step 4; likely needs
+   2-3 commits given size, same pattern as step 4.
+3. **Recipes + Lexicon tabs** (`RecipesScreen.swift` ~24KB,
+   `LexiconScreen.swift` ~16KB) -- smaller, lower risk, and Recipes exercises
+   the new Room layer end-to-end before anything more complex depends on it.
+4. **Bake session engine** (`BakeSessionEngine.swift` + `BakeStepAssembler.swift`
+   + `ProofStageNarrator.swift`, ~94KB combined) -- the hardest remaining
+   business logic, its own session so problems surface before Queue/Current
+   Bake assume a shape that turns out wrong.
+5. **Queue + Current Bake tabs** (`QueueScreen.swift`, `CurrentBakeScreen.swift`,
+   `BakeDetailScreen.swift`) -- unblocked by step 4 above.
+6. **RevenueCat + Subscription screen** (`RevenueCatPurchasesService.swift`,
+   `RevenueCatTierResolution.swift`, `SubscriptionStore.swift`,
+   `SubscriptionScreen.swift`) -- independent vertical, slotted here so
+   paywall gating exists before final polish.
+7. **Platform integrations, one session each** (not bundled as "step 8"):
+   - Camera scan/import -- `RecipeScanner.swift`, `ImportAnalyzer.swift`,
+     `ImportModal.swift`, `ImportReviewScreen.swift` (~93KB combined, the
+     biggest of these) -> CameraX + on-device text recognition (ML Kit).
+   - Push notifications -- `BakeNotificationScheduler.swift` -> WorkManager +
+     notification channels.
+   - Calendar -- `CalendarEventScheduler.swift` -> `CalendarContract`.
+   - XLSX export -- `RecipeXLSXBuilder.swift`, `RecipeXLSXExporter.swift`,
+     `RecipeXLSXStyles.swift`, `XLSXWorkbook.swift`, `XLSXWorkbookXML.swift`
+     (~55KB combined) -> same manual XML/zip construction ports directly;
+     Storage Access Framework for the share/save step.
+   - Chrome extension pairing-code redeem -- smallest of these, just needs
+     the authenticated Supabase session that already exists from step 2/3.
+8. **Remaining smaller screens sweep** -- `SettingsScreen.swift`,
+   `ConnectBrowserScreen.swift`, `IngredientCostsScreen.swift`,
+   `SetNewPasswordScreen.swift`, `DataStoreErrorScreen.swift`,
+   `PendingImportsListScreen.swift` -- leftover screens that don't fit
+   cleanly into any vertical above.
+
+
 ## Explicitly out of scope for Android v1 (per `PRODUCT_ROADMAP.md`)
 
 - Combustion Inc. thermometer integration — still queued behind the Android port on iOS too.

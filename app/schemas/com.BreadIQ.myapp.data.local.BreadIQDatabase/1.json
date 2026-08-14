@@ -1,0 +1,687 @@
+{
+  "formatVersion": 1,
+  "database": {
+    "version": 1,
+    "identityHash": "23a6b486f3bc2696fe029e525c4b7436",
+    "entities": [
+      {
+        "tableName": "bake_sessions",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` TEXT NOT NULL, `name` TEXT NOT NULL, `style` TEXT NOT NULL, `isSpeedRun` INTEGER NOT NULL, `startedAt` INTEGER NOT NULL, `currentStepIndex` INTEGER NOT NULL, `status` TEXT NOT NULL, `pausedAt` INTEGER, `pausedDurationMs` REAL NOT NULL, `ovenTempF` REAL NOT NULL, `ovenPreheatNotifId` TEXT, PRIMARY KEY(`id`))",
+        "fields": [
+          {
+            "fieldPath": "id",
+            "columnName": "id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "name",
+            "columnName": "name",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "style",
+            "columnName": "style",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "isSpeedRun",
+            "columnName": "isSpeedRun",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "startedAt",
+            "columnName": "startedAt",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "currentStepIndex",
+            "columnName": "currentStepIndex",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "status",
+            "columnName": "status",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "pausedAt",
+            "columnName": "pausedAt",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "pausedDurationMs",
+            "columnName": "pausedDurationMs",
+            "affinity": "REAL",
+            "notNull": true
+          },
+          {
+            "fieldPath": "ovenTempF",
+            "columnName": "ovenTempF",
+            "affinity": "REAL",
+            "notNull": true
+          },
+          {
+            "fieldPath": "ovenPreheatNotifId",
+            "columnName": "ovenPreheatNotifId",
+            "affinity": "TEXT"
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "id"
+          ]
+        }
+      },
+      {
+        "tableName": "bake_steps",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` TEXT NOT NULL, `sessionId` TEXT NOT NULL, `label` TEXT NOT NULL, `description` TEXT NOT NULL, `durationMinutes` INTEGER NOT NULL, `order` INTEGER NOT NULL, `noTimer` INTEGER NOT NULL, `manualStart` INTEGER NOT NULL, `scheduledEndAt` INTEGER, `actualEndAt` INTEGER, `status` TEXT NOT NULL, `notificationId` TEXT, `prepNotifId` TEXT, `coilFoldNotifIds` TEXT, PRIMARY KEY(`id`), FOREIGN KEY(`sessionId`) REFERENCES `bake_sessions`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE )",
+        "fields": [
+          {
+            "fieldPath": "id",
+            "columnName": "id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "sessionId",
+            "columnName": "sessionId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "label",
+            "columnName": "label",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "description",
+            "columnName": "description",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "durationMinutes",
+            "columnName": "durationMinutes",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "order",
+            "columnName": "order",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "noTimer",
+            "columnName": "noTimer",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "manualStart",
+            "columnName": "manualStart",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "scheduledEndAt",
+            "columnName": "scheduledEndAt",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "actualEndAt",
+            "columnName": "actualEndAt",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "status",
+            "columnName": "status",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "notificationId",
+            "columnName": "notificationId",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "prepNotifId",
+            "columnName": "prepNotifId",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "coilFoldNotifIds",
+            "columnName": "coilFoldNotifIds",
+            "affinity": "TEXT"
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "id"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_bake_steps_sessionId",
+            "unique": false,
+            "columnNames": [
+              "sessionId"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_bake_steps_sessionId` ON `${TABLE_NAME}` (`sessionId`)"
+          }
+        ],
+        "foreignKeys": [
+          {
+            "table": "bake_sessions",
+            "onDelete": "CASCADE",
+            "onUpdate": "NO ACTION",
+            "columns": [
+              "sessionId"
+            ],
+            "referencedColumns": [
+              "id"
+            ]
+          }
+        ]
+      },
+      {
+        "tableName": "queued_bakes",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` TEXT NOT NULL, `name` TEXT NOT NULL, `style` TEXT NOT NULL, `ovenTempF` REAL NOT NULL, `createdAt` INTEGER NOT NULL, `steps` TEXT NOT NULL, `scheduledBakeId` TEXT, PRIMARY KEY(`id`), FOREIGN KEY(`scheduledBakeId`) REFERENCES `scheduled_bakes`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE )",
+        "fields": [
+          {
+            "fieldPath": "id",
+            "columnName": "id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "name",
+            "columnName": "name",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "style",
+            "columnName": "style",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "ovenTempF",
+            "columnName": "ovenTempF",
+            "affinity": "REAL",
+            "notNull": true
+          },
+          {
+            "fieldPath": "createdAt",
+            "columnName": "createdAt",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "steps",
+            "columnName": "steps",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "scheduledBakeId",
+            "columnName": "scheduledBakeId",
+            "affinity": "TEXT"
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "id"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_queued_bakes_scheduledBakeId",
+            "unique": false,
+            "columnNames": [
+              "scheduledBakeId"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_queued_bakes_scheduledBakeId` ON `${TABLE_NAME}` (`scheduledBakeId`)"
+          }
+        ],
+        "foreignKeys": [
+          {
+            "table": "scheduled_bakes",
+            "onDelete": "CASCADE",
+            "onUpdate": "NO ACTION",
+            "columns": [
+              "scheduledBakeId"
+            ],
+            "referencedColumns": [
+              "id"
+            ]
+          }
+        ]
+      },
+      {
+        "tableName": "queued_bake_configs",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`queuedBakeId` TEXT NOT NULL, `numLoaves` INTEGER NOT NULL, `hydration` REAL NOT NULL, `fat` REAL NOT NULL, `salt` REAL NOT NULL, `yeast` REAL NOT NULL, `yeastType` TEXT NOT NULL, `flourBlend` TEXT NOT NULL, `sweetenerType` TEXT, `sweetenerPct` REAL NOT NULL, `usePrefermant` INTEGER NOT NULL, `prefermentType` TEXT NOT NULL, `isSpeedRun` INTEGER NOT NULL, `isHumidityMode` INTEGER NOT NULL, `relativeHumidity` REAL NOT NULL, `shapeName` TEXT NOT NULL, PRIMARY KEY(`queuedBakeId`), FOREIGN KEY(`queuedBakeId`) REFERENCES `queued_bakes`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE )",
+        "fields": [
+          {
+            "fieldPath": "queuedBakeId",
+            "columnName": "queuedBakeId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "numLoaves",
+            "columnName": "numLoaves",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "hydration",
+            "columnName": "hydration",
+            "affinity": "REAL",
+            "notNull": true
+          },
+          {
+            "fieldPath": "fat",
+            "columnName": "fat",
+            "affinity": "REAL",
+            "notNull": true
+          },
+          {
+            "fieldPath": "salt",
+            "columnName": "salt",
+            "affinity": "REAL",
+            "notNull": true
+          },
+          {
+            "fieldPath": "yeast",
+            "columnName": "yeast",
+            "affinity": "REAL",
+            "notNull": true
+          },
+          {
+            "fieldPath": "yeastType",
+            "columnName": "yeastType",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "flourBlend",
+            "columnName": "flourBlend",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "sweetenerType",
+            "columnName": "sweetenerType",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "sweetenerPct",
+            "columnName": "sweetenerPct",
+            "affinity": "REAL",
+            "notNull": true
+          },
+          {
+            "fieldPath": "usePrefermant",
+            "columnName": "usePrefermant",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "prefermentType",
+            "columnName": "prefermentType",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "isSpeedRun",
+            "columnName": "isSpeedRun",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "isHumidityMode",
+            "columnName": "isHumidityMode",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "relativeHumidity",
+            "columnName": "relativeHumidity",
+            "affinity": "REAL",
+            "notNull": true
+          },
+          {
+            "fieldPath": "shapeName",
+            "columnName": "shapeName",
+            "affinity": "TEXT",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "queuedBakeId"
+          ]
+        },
+        "foreignKeys": [
+          {
+            "table": "queued_bakes",
+            "onDelete": "CASCADE",
+            "onUpdate": "NO ACTION",
+            "columns": [
+              "queuedBakeId"
+            ],
+            "referencedColumns": [
+              "id"
+            ]
+          }
+        ]
+      },
+      {
+        "tableName": "scheduled_bakes",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` TEXT NOT NULL, `name` TEXT NOT NULL, `style` TEXT NOT NULL, `targetFinishTime` INTEGER NOT NULL, `startTime` INTEGER NOT NULL, `totalStepMinutes` INTEGER NOT NULL, `startReminderNotifId` TEXT, `startTimeNotifId` TEXT, `calendarEventId` TEXT, `createdAt` INTEGER NOT NULL, PRIMARY KEY(`id`))",
+        "fields": [
+          {
+            "fieldPath": "id",
+            "columnName": "id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "name",
+            "columnName": "name",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "style",
+            "columnName": "style",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "targetFinishTime",
+            "columnName": "targetFinishTime",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "startTime",
+            "columnName": "startTime",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "totalStepMinutes",
+            "columnName": "totalStepMinutes",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "startReminderNotifId",
+            "columnName": "startReminderNotifId",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "startTimeNotifId",
+            "columnName": "startTimeNotifId",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "calendarEventId",
+            "columnName": "calendarEventId",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "createdAt",
+            "columnName": "createdAt",
+            "affinity": "INTEGER",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "id"
+          ]
+        }
+      },
+      {
+        "tableName": "recipes",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` INTEGER NOT NULL, `userId` TEXT NOT NULL, `name` TEXT NOT NULL, `loafStyle` TEXT NOT NULL, `numLoaves` INTEGER NOT NULL, `hydrationPercent` REAL NOT NULL, `fatPercent` REAL NOT NULL, `flourWeight` REAL NOT NULL, `waterWeight` REAL NOT NULL, `fatWeight` REAL NOT NULL, `saltWeight` REAL NOT NULL, `yeastWeight` REAL NOT NULL, `yeastPercent` REAL NOT NULL, `yeastType` TEXT, `loafShape` TEXT, `preFermentType` TEXT, `preFermentFlourWeight` REAL, `preFermentWaterWeight` REAL, `preFermentYeastWeight` REAL, `fermentationType` TEXT NOT NULL, `proofMinutes` REAL, `notes` TEXT, `flourBlend` TEXT, `sweetenerType` TEXT, `sweetenerWeight` REAL, `humidityRh` INTEGER, `humidityDirection` TEXT, `humidityAdjusted` INTEGER NOT NULL, `waterWeightUnadjusted` REAL, `createdAt` INTEGER NOT NULL, `importSourceURL` TEXT, `importSourceName` TEXT, `formatNote` TEXT, PRIMARY KEY(`id`))",
+        "fields": [
+          {
+            "fieldPath": "id",
+            "columnName": "id",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "userId",
+            "columnName": "userId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "name",
+            "columnName": "name",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "loafStyle",
+            "columnName": "loafStyle",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "numLoaves",
+            "columnName": "numLoaves",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "hydrationPercent",
+            "columnName": "hydrationPercent",
+            "affinity": "REAL",
+            "notNull": true
+          },
+          {
+            "fieldPath": "fatPercent",
+            "columnName": "fatPercent",
+            "affinity": "REAL",
+            "notNull": true
+          },
+          {
+            "fieldPath": "flourWeight",
+            "columnName": "flourWeight",
+            "affinity": "REAL",
+            "notNull": true
+          },
+          {
+            "fieldPath": "waterWeight",
+            "columnName": "waterWeight",
+            "affinity": "REAL",
+            "notNull": true
+          },
+          {
+            "fieldPath": "fatWeight",
+            "columnName": "fatWeight",
+            "affinity": "REAL",
+            "notNull": true
+          },
+          {
+            "fieldPath": "saltWeight",
+            "columnName": "saltWeight",
+            "affinity": "REAL",
+            "notNull": true
+          },
+          {
+            "fieldPath": "yeastWeight",
+            "columnName": "yeastWeight",
+            "affinity": "REAL",
+            "notNull": true
+          },
+          {
+            "fieldPath": "yeastPercent",
+            "columnName": "yeastPercent",
+            "affinity": "REAL",
+            "notNull": true
+          },
+          {
+            "fieldPath": "yeastType",
+            "columnName": "yeastType",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "loafShape",
+            "columnName": "loafShape",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "preFermentType",
+            "columnName": "preFermentType",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "preFermentFlourWeight",
+            "columnName": "preFermentFlourWeight",
+            "affinity": "REAL"
+          },
+          {
+            "fieldPath": "preFermentWaterWeight",
+            "columnName": "preFermentWaterWeight",
+            "affinity": "REAL"
+          },
+          {
+            "fieldPath": "preFermentYeastWeight",
+            "columnName": "preFermentYeastWeight",
+            "affinity": "REAL"
+          },
+          {
+            "fieldPath": "fermentationType",
+            "columnName": "fermentationType",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "proofMinutes",
+            "columnName": "proofMinutes",
+            "affinity": "REAL"
+          },
+          {
+            "fieldPath": "notes",
+            "columnName": "notes",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "flourBlend",
+            "columnName": "flourBlend",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "sweetenerType",
+            "columnName": "sweetenerType",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "sweetenerWeight",
+            "columnName": "sweetenerWeight",
+            "affinity": "REAL"
+          },
+          {
+            "fieldPath": "humidityRh",
+            "columnName": "humidityRh",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "humidityDirection",
+            "columnName": "humidityDirection",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "humidityAdjusted",
+            "columnName": "humidityAdjusted",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "waterWeightUnadjusted",
+            "columnName": "waterWeightUnadjusted",
+            "affinity": "REAL"
+          },
+          {
+            "fieldPath": "createdAt",
+            "columnName": "createdAt",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "importSourceURL",
+            "columnName": "importSourceURL",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "importSourceName",
+            "columnName": "importSourceName",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "formatNote",
+            "columnName": "formatNote",
+            "affinity": "TEXT"
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "id"
+          ]
+        }
+      },
+      {
+        "tableName": "ingredient_price_overrides",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`ingredientKey` TEXT NOT NULL, `pricePerGram` REAL NOT NULL, PRIMARY KEY(`ingredientKey`))",
+        "fields": [
+          {
+            "fieldPath": "ingredientKey",
+            "columnName": "ingredientKey",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "pricePerGram",
+            "columnName": "pricePerGram",
+            "affinity": "REAL",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "ingredientKey"
+          ]
+        }
+      }
+    ],
+    "setupQueries": [
+      "CREATE TABLE IF NOT EXISTS room_master_table (id INTEGER PRIMARY KEY,identity_hash TEXT)",
+      "INSERT OR REPLACE INTO room_master_table (id,identity_hash) VALUES(42, '23a6b486f3bc2696fe029e525c4b7436')"
+    ]
+  }
+}

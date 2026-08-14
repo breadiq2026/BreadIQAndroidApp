@@ -43,6 +43,7 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import com.BreadIQ.myapp.core.HapticImpactStyle
 import com.BreadIQ.myapp.core.HapticNotificationType
 import com.BreadIQ.myapp.core.Haptics
+import com.BreadIQ.myapp.core.RawScheduledBakePlan
 import com.BreadIQ.myapp.model.calculatorCardTitles
 import com.BreadIQ.myapp.ui.components.BreadIQButton
 import com.BreadIQ.myapp.ui.components.BreadIQButtonVariant
@@ -72,6 +73,8 @@ fun CalculatorScreen(
     viewModel: CalculatorViewModel = viewModel(factory = CalculatorViewModelFactory(LocalContext.current)),
     onOpenNutrition: () -> Unit = {},
     onOpenAutolyse: () -> Unit = {},
+    onStartedBake: (String) -> Unit = {},
+    onScheduleBake: (RawScheduledBakePlan) -> Unit = {},
 ) {
     val state by viewModel.uiState.collectAsState()
     val colors = LocalBreadIQColors.current
@@ -102,7 +105,10 @@ fun CalculatorScreen(
                 1 -> CardFlourAndFormula(state = state, viewModel = viewModel)
                 2 -> CardFermentation(state = state, viewModel = viewModel)
                 3 -> CardEnvironment(state = state, viewModel = viewModel)
-                else -> CardCalculateResults(state = state, viewModel = viewModel, onOpenNutrition = onOpenNutrition, onOpenAutolyse = onOpenAutolyse)
+                else -> CardCalculateResults(
+                    state = state, viewModel = viewModel, onOpenNutrition = onOpenNutrition, onOpenAutolyse = onOpenAutolyse,
+                    onStartedBake = onStartedBake, onScheduleBake = onScheduleBake,
+                )
             }
         }
 

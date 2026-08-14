@@ -4,14 +4,21 @@ import android.content.Context
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
+import com.BreadIQ.myapp.core.BakeNotificationScheduler
+import com.BreadIQ.myapp.core.BakeSessionEngine
+import com.BreadIQ.myapp.core.BakeStartResult
+import com.BreadIQ.myapp.core.BakeStepAssemblyInput
+import com.BreadIQ.myapp.core.BakeStepAssembler
 import com.BreadIQ.myapp.core.CalculatorFormatting
 import com.BreadIQ.myapp.core.FormulaCalculator
 import com.BreadIQ.myapp.core.FormulaInput
 import com.BreadIQ.myapp.core.ProofStageNarrator
 import com.BreadIQ.myapp.core.ProofTimeCalculator
 import com.BreadIQ.myapp.core.ProofTimeInput
+import com.BreadIQ.myapp.core.RawScheduledBakePlan
 import com.BreadIQ.myapp.core.swiftRounded
 import com.BreadIQ.myapp.data.TemperatureUnitStore
+import com.BreadIQ.myapp.data.local.BakeSessionDao
 import com.BreadIQ.myapp.data.local.DatabaseProvider
 import com.BreadIQ.myapp.data.local.QueuedBakeConfigEntity
 import com.BreadIQ.myapp.data.local.QueuedBakeDao
@@ -19,6 +26,7 @@ import com.BreadIQ.myapp.data.local.RecipeDao
 import com.BreadIQ.myapp.data.local.IngredientPriceOverrideDao
 import com.BreadIQ.myapp.data.local.toDomain
 import com.BreadIQ.myapp.data.local.toEntity
+import com.BreadIQ.myapp.model.BakeSession
 import com.BreadIQ.myapp.model.BakeUserTier
 import com.BreadIQ.myapp.model.BreadStyleCatalog
 import com.BreadIQ.myapp.model.BreadStyleDef
@@ -125,6 +133,8 @@ data class CalculatorUiState(
     val proofResult: ProofTimeResult? = null,
     val loading: Boolean = false,
     val startingBake: Boolean = false,
+    /** Consumed once by the screen's own nav handoff to Bake Detail once Start Now succeeds. */
+    val startedSessionId: String? = null,
 
     // Save recipe
     val recipeName: String = "",
@@ -164,6 +174,9 @@ data class CalculatorUiState(
 
     /** Mirrors the source's `queuedBakeCount` computed property (backed by its own `@Query`). */
     val queuedBakeCount: Int = 0,
+
+    /** Mirrors the source's live `@Query private var sessions: [BakeSession]` — needed by [BakeSessionEngine.startBake]'s own active-bake-limit gate. */
+    val sessions: List<BakeSession> = emptyList(),
 
     /** Mirrors the source's `@Environment(TemperatureUnitStore.self)` — see [TemperatureUnitStore]'s own doc comment for why this can't be changed from any UI yet. */
     val temperatureUnit: TemperatureUnit = TemperatureUnit.FAHRENHEIT,
@@ -222,19 +235,21 @@ val CalculatorUiState.autolyseGuidance: com.BreadIQ.myapp.core.AutolyseGuidance 
  *   departure — no UI anywhere in the source ever sets `bulkBatchMode`).
  * - `isSourdough` hardcoded `false` in [ProofTimeInput] (iOS's own
  *   departure — no reachable UI control for it).
- * - `handleStartBake()`/`assembledSteps()` (needs `BakeSessionEngine`/
- *   `BakeStepAssembler`), `handleOpenScheduleModal()` (Schedule, deferred
- *   per direct instruction), `handleShareRecipe()` (needs
+ * - `handleOpenScheduleModal()`/Schedule Bake's actual submit still
+ *   lives on the Schedule screen's own `ScheduleViewModel`, not here —
+ *   this ViewModel only builds the plan the Schedule screen needs
+ *   ([buildBakePlan]), matching the iOS source's own `currentQueuedBakePlan()`
+ *   / `ScheduleModal` split. `handleShareRecipe()` (needs
  *   `RecipeXLSXExporter`), `autoSaveImportedRecipe()` (Import, deferred)
- *   are all left unported — each needs a dependency outside this
- *   session's scope. `handleQueueBake()` — approved as in-scope this
- *   session, since it only needs [ProofStageNarrator]'s stage list (now
- *   ported) plus [QueuedBakeDao] (already built) — is fully wired below.
+ *   are left unported — each needs a dependency outside this session's
+ *   scope. `handleQueueBake()`/`handleStartBake()` are fully wired
+ *   below, now that [BakeSessionEngine]/[BakeStepAssembler] both exist.
  */
 class CalculatorViewModel(
     private val recipeDao: RecipeDao,
     private val queuedBakeDao: QueuedBakeDao,
     private val ingredientPriceOverrideDao: IngredientPriceOverrideDao,
+    private val bakeSessionDao: BakeSessionDao,
     temperatureUnitStore: TemperatureUnitStore,
 ) : ViewModel() {
 
@@ -255,6 +270,11 @@ class CalculatorViewModel(
         viewModelScope.launch {
             ingredientPriceOverrideDao.observeAll().collect { overrides ->
                 update { it.copy(customIngredientPrices = overrides.associate { o -> o.ingredientKey to o.pricePerGram }) }
+            }
+        }
+        viewModelScope.launch {
+            bakeSessionDao.observeAll().collect { rows ->
+                update { it.copy(sessions = rows.map { row -> row.toDomain() }) }
             }
         }
     }
@@ -624,9 +644,11 @@ class CalculatorViewModel(
 
     /**
      * Builds the [QueuedBake] the current calculator state would queue —
-     * matches the iOS source's `currentQueuedBakePlan()`, minus the
-     * `RawScheduledBakePlan` wrapper that exists there only to feed the
-     * (deferred) Schedule sheet.
+     * matches the iOS source's `currentQueuedBakePlan()`. [buildBakePlan]
+     * below wraps this same result for the Schedule screen, matching how
+     * the source's own `currentQueuedBakePlan()` feeds BOTH
+     * `handleQueueBake()` and `handleOpenScheduleModal()` from one
+     * shared plan-building function.
      */
     private fun currentQueuedBake(s: CalculatorUiState): QueuedBake? {
         val proofResult = s.proofResult ?: return null
@@ -657,6 +679,58 @@ class CalculatorViewModel(
             update { it.copy(queueSuccessShown = true) }
         }
     }
+
+    /** Builds the plan the Schedule screen needs for "Schedule Bake" — the same simple, proof-stage-based steps [handleQueueBake] stores, per [currentQueuedBake]'s own doc comment. Null when there's no current formula/proof result to schedule. */
+    fun buildBakePlan(): RawScheduledBakePlan? {
+        val queued = currentQueuedBake(_uiState.value) ?: return null
+        return RawScheduledBakePlan(name = queued.name, style = queued.style, ovenTempF = queued.ovenTempF, steps = queued.steps, config = queued.config)
+    }
+
+    /**
+     * `handleStartBake()` — unlike [handleQueueBake]/[buildBakePlan],
+     * this builds the FULL, richly-detailed step list via
+     * [BakeStepAssembler.assemble] (recipe card, ingredient-line
+     * breakdowns, per-style mix/bake text) rather than the simple
+     * proof-stage-only steps a queued/scheduled bake stores — matching
+     * the iOS source's own `assembledSteps()`, a genuinely different
+     * (richer) step list than `currentQueuedBakePlan()` produces, not
+     * an inconsistency to unify.
+     */
+    fun handleStartBake() {
+        val s = _uiState.value
+        val formulaResult = s.formulaResult ?: return
+        val proofResult = s.proofResult ?: return
+
+        update { it.copy(startingBake = true) }
+
+        val assemblyInput = BakeStepAssemblyInput(
+            formulaResult = formulaResult, proofResult = proofResult, style = s.selectedStyle, flourBlend = s.flourBlend,
+            yeastType = s.yeastType, sweetenerType = s.sweetenerType, usePrefermant = s.usePrefermant,
+            prefermentType = s.prefermentType, prefermentFlourPercent = s.prefermentFlourPct, liquidType = s.liquidType,
+            pretzelBathType = s.pretzelBathType, selectedShapeValue = s.selectedShapeValue, temperatureUnit = s.temperatureUnit,
+        )
+        val rawSteps = BakeStepAssembler.assemble(assemblyInput)
+
+        val result = BakeSessionEngine.startBake(
+            name = "${s.selectedStyle.label} — ${s.currentShapeName}", style = s.selectedStyle.label, steps = rawSteps,
+            ovenTempF = s.selectedStyle.ovenTempF.low, isSpeedRun = s.isSpeedRun, tier = s.userTier, existingSessions = s.sessions,
+        )
+        update { it.copy(startingBake = false) }
+
+        when (result) {
+            is BakeStartResult.Failure -> update { it.copy(startError = result.failure.message) }
+            is BakeStartResult.Success -> {
+                val session = result.session
+                viewModelScope.launch {
+                    bakeSessionDao.upsertSessionWithSteps(session.toEntity(), session.steps.map { it.toEntity(session.id) })
+                    BakeNotificationScheduler.afterStart(session)
+                    update { it.copy(startedSessionId = session.id) }
+                }
+            }
+        }
+    }
+
+    fun clearStartedSessionId() = update { it.copy(startedSessionId = null) }
 }
 
 /**
@@ -674,6 +748,7 @@ class CalculatorViewModelFactory(private val context: Context) : ViewModelProvid
             recipeDao = db.recipeDao(),
             queuedBakeDao = db.queuedBakeDao(),
             ingredientPriceOverrideDao = db.ingredientPriceOverrideDao(),
+            bakeSessionDao = db.bakeSessionDao(),
             temperatureUnitStore = TemperatureUnitStore(prefs),
         ) as T
     }

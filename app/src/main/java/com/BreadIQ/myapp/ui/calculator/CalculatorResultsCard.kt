@@ -17,9 +17,12 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -40,6 +43,7 @@ import com.BreadIQ.myapp.core.FormulaCalculator
 import com.BreadIQ.myapp.core.HapticImpactStyle
 import com.BreadIQ.myapp.core.HapticNotificationType
 import com.BreadIQ.myapp.core.Haptics
+import com.BreadIQ.myapp.core.RawScheduledBakePlan
 import com.BreadIQ.myapp.core.TemperatureFormatting
 import com.BreadIQ.myapp.core.swiftRounded
 import com.BreadIQ.myapp.model.BreadStyleDef
@@ -72,14 +76,21 @@ import com.BreadIQ.myapp.viewmodel.sweetMeta
  * here now so this file doesn't need to change shape again once that
  * step lands, only the call site.
  *
- * **Queue for Later is wired for real** (approved last session — only
- * needs [com.BreadIQ.myapp.core.ProofStageNarrator]'s stage list plus
- * `QueuedBakeDao`, both done). **Start Now, Schedule Bake, and Share
- * Recipe render disabled** — each needs a dependency outside this
- * session's scope (`BakeSessionEngine`/`BakeStepAssembler`; Schedule is
- * deferred per direct instruction regardless; `RecipeXLSXExporter`) —
- * per direct instruction to show deferred-flow controls as visibly
- * disabled rather than omit them.
+ * **Queue for Later, Start Now, and Schedule Bake are all wired for
+ * real** — `BakeSessionEngine`/`BakeStepAssembler` (bake-session-engine
+ * session) and the Queue/CurrentBake/Schedule screens (this session)
+ * closed the last gaps. **Share Recipe still renders disabled** —
+ * `RecipeXLSXExporter` remains out of scope — per direct instruction to
+ * show deferred-flow controls as visibly disabled rather than omit them.
+ *
+ * [onStartedBake] fires once [CalculatorViewModel.handleStartBake]
+ * succeeds, carrying the new session id — the caller (`CalculatorScreen`
+ * → `MainActivity`) is expected to navigate to Bake Detail (or Current
+ * Bake) with it. [onScheduleBake] fires when "Schedule Bake" is tapped,
+ * carrying the plan built by [CalculatorViewModel.buildBakePlan] — the
+ * caller navigates to the Schedule screen with it (see the
+ * `pendingSchedulePlan` handoff in `MainActivity.kt`, mirroring
+ * `pendingRecipeId`'s pattern).
  */
 @Composable
 internal fun CardCalculateResults(
@@ -87,8 +98,30 @@ internal fun CardCalculateResults(
     viewModel: CalculatorViewModel,
     onOpenNutrition: () -> Unit = {},
     onOpenAutolyse: () -> Unit = {},
+    onStartedBake: (String) -> Unit = {},
+    onScheduleBake: (RawScheduledBakePlan) -> Unit = {},
 ) {
     val context = LocalContext.current
+
+    state.startedSessionId?.let { sessionId ->
+        LaunchedEffect(sessionId) {
+            Haptics.notification(context, HapticNotificationType.SUCCESS)
+            onStartedBake(sessionId)
+            viewModel.clearStartedSessionId()
+        }
+    }
+
+    if (state.startError != null) {
+        AlertDialog(
+            onDismissRequest = { viewModel.update { it.copy(startError = null) } },
+            title = { Text("Couldn't Start Bake") },
+            text = { Text(state.startError) },
+            confirmButton = {
+                TextButton(onClick = { viewModel.update { it.copy(startError = null) } }) { Text("OK") }
+            },
+        )
+    }
+
     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
         RecipeSummaryCard(state)
         BreadIQButton(
@@ -145,11 +178,22 @@ internal fun CardCalculateResults(
                     modifier = Modifier.weight(1f),
                 )
                 BreadIQButton(
-                    label = "Start Now", variant = BreadIQButtonVariant.ORANGE,
-                    disabled = true, onClick = {}, modifier = Modifier.weight(1f),
+                    label = if (state.startingBake) "Starting…" else "Start Now", variant = BreadIQButtonVariant.ORANGE,
+                    disabled = state.proofResult == null || state.startingBake, loading = state.startingBake,
+                    onClick = { viewModel.handleStartBake() },
+                    modifier = Modifier.weight(1f),
                 )
             }
-            BreadIQButton(label = "Schedule Bake", variant = BreadIQButtonVariant.SECONDARY, disabled = true, fullWidth = true, onClick = {})
+            BreadIQButton(
+                label = "Schedule Bake", variant = BreadIQButtonVariant.SECONDARY,
+                disabled = state.proofResult == null || state.startingBake, fullWidth = true,
+                onClick = {
+                    viewModel.buildBakePlan()?.let { plan ->
+                        Haptics.impact(context, HapticImpactStyle.LIGHT)
+                        onScheduleBake(plan)
+                    }
+                },
+            )
             BreadIQButton(
                 label = if (state.isPremium) "Share Recipe" else "🔒 Share Recipe — Premium",
                 variant = BreadIQButtonVariant.SECONDARY, disabled = true, fullWidth = true, onClick = {},

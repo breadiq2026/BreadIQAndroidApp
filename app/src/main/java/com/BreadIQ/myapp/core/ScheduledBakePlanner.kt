@@ -166,4 +166,17 @@ object ScheduledBakePlanner {
 
     fun removeScheduledBake(scheduledBakes: List<ScheduledBake>, id: String): List<ScheduledBake> =
         scheduledBakes.filter { it.id != id }
+
+    /**
+     * Rebuilds a fresh [RawScheduledBakePlan] from an existing
+     * [ScheduledBake]'s owned `queueItem`, for handing to the Schedule
+     * screen's "reschedule" flow — the same shape
+     * `CalculatorViewModel.currentQueuedBake()` builds from live form
+     * state, just sourced from an already-scheduled bake's snapshot
+     * instead.
+     */
+    fun reschedulePlan(from: ScheduledBake): RawScheduledBakePlan = RawScheduledBakePlan(
+        name = from.name, style = from.style, ovenTempF = from.queueItem.ovenTempF,
+        steps = from.queueItem.steps, config = from.queueItem.config,
+    )
 }

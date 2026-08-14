@@ -154,6 +154,19 @@ fun CalculatorScreen(
             },
         )
     }
+
+    val upgradeTitle = state.upgradePromptTitle
+    val upgradeBody = state.upgradePromptBody
+    if (upgradeTitle != null) {
+        AlertDialog(
+            onDismissRequest = { viewModel.update { it.copy(upgradePromptTitle = null, upgradePromptBody = null) } },
+            title = { Text(upgradeTitle) },
+            text = { Text(upgradeBody ?: "") },
+            confirmButton = {
+                TextButton(onClick = { viewModel.update { it.copy(upgradePromptTitle = null, upgradePromptBody = null) } }) { Text("OK") }
+            },
+        )
+    }
 }
 
 @Composable

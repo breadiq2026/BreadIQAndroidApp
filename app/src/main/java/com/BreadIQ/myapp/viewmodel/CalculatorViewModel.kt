@@ -198,6 +198,7 @@ val CalculatorUiState.hydAdj: Double get() = CalculatorFormatting.computeHydrati
 val CalculatorUiState.yeastMeta: YeastOption get() = calculatorYeastTypes.firstOrNull { it.value == yeastType } ?: calculatorYeastTypes[0]
 val CalculatorUiState.sweetMeta: SweetenerOption? get() = calculatorSweetenerTypes.firstOrNull { it.value == sweetenerType }
 val CalculatorUiState.prefInfo: PrefermentInfo? get() = prefermentTypes[prefermentType]
+val CalculatorUiState.autolyseGuidance: com.BreadIQ.myapp.core.AutolyseGuidance get() = com.BreadIQ.myapp.core.AutolyseCalculator.calculate(flourBlend)
 
 /**
  * Ported from the iOS app's `Screens/CalculatorScreen.swift`.
@@ -266,6 +267,9 @@ class CalculatorViewModel(
     fun goToCard(index: Int) = update { it.copy(cardIndex = index.coerceIn(0, 4)) }
     fun nextCard() = update { it.copy(cardIndex = (it.cardIndex + 1).coerceAtMost(4)) }
     fun previousCard() = update { it.copy(cardIndex = (it.cardIndex - 1).coerceAtLeast(0)) }
+
+    /** `showUpgradeAlert()`. The source's alert offers "See Plans" (→ the subscription paywall) alongside "Maybe later" — this port shows a single dismiss button instead, since no `SubscriptionScreen` exists yet to route "See Plans" to (its own separate, already-planned sequence item). */
+    fun showUpgradeAlert(title: String, body: String) = update { it.copy(upgradePromptTitle = title, upgradePromptBody = body) }
 
     // MARK: - Actions
 

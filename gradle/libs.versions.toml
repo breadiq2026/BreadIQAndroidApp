@@ -50,6 +50,21 @@ room = "2.8.4"
 # same "verify against the pinned version, not latest" discipline as the
 # supabase-kt/Ktor pins above).
 ksp = "2.2.0-2.0.2"
+# CameraX, added for PORTING_PLAN.md step 7 (camera/OCR import, Session A
+# — real capture, not yet wired into any screen). 1.5.1 is the latest
+# stable release (confirmed via search against Android's own CameraX
+# release notes/Maven Repository, not assumed) and targets this repo's
+# existing compileSdk 35 cleanly. All four artifacts below share this one
+# version, matching CameraX's own "bump them together" release model.
+cameraX = "1.5.1"
+# ML Kit Text Recognition — the on-device, no-network Latin-script
+# variant (`com.google.mlkit:text-recognition`, not the unbundled
+# `com.google.android.gms:play-services-mlkit-text-recognition` variant,
+# whose model downloads via Play Services on first use — bundled keeps
+# this session's "confirmed fully offline" requirement true even on a
+# device's very first scan). 16.0.1 confirmed as latest stable via
+# Google's own ML Kit docs at the time this was added.
+mlkitTextRecognition = "16.0.1"
 
 [libraries]
 androidx-core-ktx = { group = "androidx.core", name = "core-ktx", version.ref = "coreKtx" }
@@ -78,6 +93,11 @@ kotlinx-serialization-json = { group = "org.jetbrains.kotlinx", name = "kotlinx-
 androidx-room-runtime = { group = "androidx.room", name = "room-runtime", version.ref = "room" }
 androidx-room-ktx = { group = "androidx.room", name = "room-ktx", version.ref = "room" }
 androidx-room-compiler = { group = "androidx.room", name = "room-compiler", version.ref = "room" }
+androidx-camera-core = { group = "androidx.camera", name = "camera-core", version.ref = "cameraX" }
+androidx-camera-camera2 = { group = "androidx.camera", name = "camera-camera2", version.ref = "cameraX" }
+androidx-camera-lifecycle = { group = "androidx.camera", name = "camera-lifecycle", version.ref = "cameraX" }
+androidx-camera-view = { group = "androidx.camera", name = "camera-view", version.ref = "cameraX" }
+mlkit-text-recognition = { group = "com.google.mlkit", name = "text-recognition", version.ref = "mlkitTextRecognition" }
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }

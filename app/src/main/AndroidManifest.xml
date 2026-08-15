@@ -24,6 +24,19 @@
     <uses-permission android:name="android.permission.READ_CALENDAR" />
     <uses-permission android:name="android.permission.WRITE_CALENDAR" />
 
+    <!-- Camera scan/import (PORTING_PLAN.md step 7, Session A). Requested
+         lazily by ui/components/RecipeScanCapture.kt's CameraCaptureScreen
+         the moment it's shown, matching the calendar permissions' lazy
+         pattern above. No photo-library/media-storage permission is
+         declared anywhere — the Photo Picker path needs none, see that
+         file's own doc comment. `required="false"` on the feature
+         declaration matches the source's own `isSourceTypeAvailable(.camera)`
+         graceful-degradation check — a camera-less device can still
+         install and use the app, just not the camera scan path. -->
+    <uses-permission android:name="android.permission.CAMERA" />
+    <uses-feature android:name="android.hardware.camera" android:required="false" />
+    <uses-feature android:name="android.hardware.camera.any" android:required="false" />
+
     <application
         android:name=".BreadIQApplication"
         android:allowBackup="true"

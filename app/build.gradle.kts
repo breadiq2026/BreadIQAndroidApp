@@ -90,6 +90,17 @@ dependencies {
     implementation(libs.androidx.room.ktx)
     ksp(libs.androidx.room.compiler)
 
+    // CameraX + ML Kit Text Recognition (PORTING_PLAN.md step 7, camera/
+    // OCR import Session A) — camera-view's PreviewView for the live
+    // preview surface (via AndroidView interop, see
+    // ui/components/RecipeScanCapture.kt's own doc comment), ML Kit for
+    // on-device OCR. Both fully offline at inference time.
+    implementation(libs.androidx.camera.core)
+    implementation(libs.androidx.camera.camera2)
+    implementation(libs.androidx.camera.lifecycle)
+    implementation(libs.androidx.camera.view)
+    implementation(libs.mlkit.text.recognition)
+
     testImplementation(libs.junit)
     androidTestImplementation(libs.androidx.junit)
     androidTestImplementation(libs.androidx.espresso.core)

@@ -420,12 +420,70 @@ Concrete order:
        complete, and ready for Session B to call from `ImportModal`,
        matching this codebase's existing "port it for real even without
        a caller yet" precedent (`ui/components/BakeStepRow.kt`).
-     - **Session B (ImportModal/ImportReviewScreen + wiring into the
-       Calculator tab) -- not yet started.** `ImportModal.swift`'s
-       picker/menu UI and `ImportReviewScreen.swift`'s structured review
-       UI, plus threading a real result back into `CalculatorViewModel`
-       via [CalculatorImportMapping]-shaped data. "Scan Recipe" is not
-       reachable anywhere in the app until this session lands.
+     - **Session B (`ImportModal` UI + wiring) -- ✅ done 2026-08-14,
+       1 commit. Camera scan/import is now fully done (both sessions).**
+       Ports `Screens/ImportModal.swift` + `Core/ImportModalFormatting.swift`
+       as a new `ui/calculator/ImportScreen.kt` -- the real 3-step
+       ingredients -> environment -> results wizard, wired as a real
+       Compose Navigation route (`BreadIQRoutes.IMPORT`), matching this
+       codebase's established convention for iOS `.sheet` screens
+       (`ScheduleScreen`/`NutritionAnalysisScreen`/`AutolyseGuidanceScreen`),
+       not a `Dialog`. Calculator's "Import" header button is real now --
+       no longer the dimmed stub from the Calculator session.
+
+       **Confirmed genuinely self-contained, directly against the
+       source**: `ImportScreen` takes only `onClose`, has its own
+       `ImportViewModel`, and does NOT read from or write into
+       `CalculatorViewModel` -- `ImportModal.swift` has no
+       "Apply to Calculator" action anywhere; Step 3 just displays the
+       computed `ImportAnalysisResult` in place.
+       `core/CalculatorImportMapping.kt` (ported in Session A) is
+       deliberately NOT used here -- it belongs to the separate Safari/
+       Chrome-extension staged-import deep-link flow (see the new backlog
+       note below), a different flow this session correctly leaves alone.
+
+       **The one genuinely new piece of infrastructure**: `data/BackendApiClient.kt`
+       + `data/BackendImportURLFetcher.kt` -- a minimal Ktor-based client
+       for the one real, live, unauthenticated backend call `ImportModal`
+       needs (`POST https://breadlab.replit.app/api/import/fetch-url`),
+       confirmed NOT a stub (unlike the pairing-code feature). Reuses
+       `io.ktor:ktor-client-android` (already a transitive dependency from
+       the Supabase phase) with manual `kotlinx.serialization.json.Json`
+       encode/decode rather than adding the Ktor `ContentNegotiation` +
+       `kotlinx-json` plugins for this one call. Confirmed against the
+       source's own doc comment that the route always responds 200 even
+       on a logical failure -- both shapes decode into the same lenient
+       DTO. Deliberately narrower than the source's full `BackendAPIClient`
+       (no bearer-token attachment, no GET support) -- nothing else on
+       Android needs a raw backend REST call yet; extend it if/when a
+       second real call site shows up.
+
+       Step 1's ingredient rows respect the existing app-wide
+       `TemperatureUnitStore` for Step 2's temp fields, same pattern
+       `CalculatorViewModel` already uses. The camera/library scan
+       trigger itself stays at the Composable layer
+       (`rememberRecipeScanner`/`RecipeScannerCameraOverlay` from Session
+       A) -- `ImportViewModel` only consumes an already-resolved
+       `RecipeScanOutcome`, matching the Context/Activity boundary every
+       other camera/picker feature in this app already established.
+
+   - **New backlog item, not yet planned or sequenced**: `ImportReviewScreen.swift`
+     (551 lines) + `PendingImportsListScreen.swift` -- the Safari/Chrome-extension
+     staged-import deep-link flow (`AppRouter.pendingImportToken`,
+     populated by iOS's `onOpenURL`). Checked directly during the camera
+     scan/import Session B handoff: Android has zero deep-link/App Links
+     infrastructure anywhere in this app yet (no `intent-filter` for App
+     Links, no URL-open handler) -- there is currently no way for a
+     staged-import token to ever reach the app, so porting
+     `ImportReviewScreen` before that infra exists would build a screen
+     nothing can ever navigate to. `PendingImportsListScreen` is
+     separately also backend-blocked on `GET /api/import/staged`'s list
+     endpoint not existing yet (`core/ImportServices.kt`'s
+     `UnconfiguredImportInboxFetcher` already documents this). Needs: (1)
+     deep-link/App Links infra (new, nothing to build on), (2)
+     `ImportReviewScreen` itself, (3) `PendingImportsListScreen` once its
+     backend route ships. `core/CalculatorImportMapping.kt` is already
+     ported and ready for whenever this lands.
    - Push notifications -- `BakeNotificationScheduler.swift` -- ✅ done
      2026-08-14, 1 commit. Real bodies for `core/BakeNotificationScheduler.kt`'s
      four stub functions (`afterStart`, `cancel`, `syncAfterMutation`,

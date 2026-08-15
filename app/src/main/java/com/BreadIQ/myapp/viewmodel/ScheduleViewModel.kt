@@ -4,6 +4,8 @@ import android.content.Context
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
+import com.BreadIQ.myapp.core.CalendarEventResult
+import com.BreadIQ.myapp.core.CalendarEventScheduler
 import com.BreadIQ.myapp.core.RawScheduledBakePlan
 import com.BreadIQ.myapp.core.ScheduleBakeResult
 import com.BreadIQ.myapp.core.ScheduledBakePlanner
@@ -26,8 +28,19 @@ data class ScheduleUiState(
     val existingScheduledCount: Int = 0,
     val submitting: Boolean = false,
     val error: String? = null,
-    /** Set once scheduling succeeds — consumed once by the screen's own confirmation + dismiss flow. */
+    /**
+     * Set once scheduling succeeds — drives the screen's own "Bake
+     * Scheduled" confirmation dialog ("No Thanks" / "Add to Calendar").
+     * Cleared either immediately (dismiss / "No Thanks") or by
+     * [addToCalendar] once it resolves (success or failure) — the
+     * screen distinguishes those two outcomes via [calendarError] being
+     * set or not, not via this field.
+     */
     val scheduled: ScheduledBake? = null,
+    /** True while [addToCalendar]'s coroutine is in flight — disables the confirmation dialog's buttons so a second tap can't fire a duplicate calendar write. */
+    val addingToCalendar: Boolean = false,
+    /** Set on a failed [addToCalendar] call — surfaced by the screen's own separate "Couldn't Add to Calendar" dialog, matching the source's distinct `calendarEventError` alert. */
+    val calendarError: String? = null,
     /** Hardcoded to [BakeUserTier.FREE] — same stub as `CalculatorUiState.userTier`, no `SubscriptionStore` port exists yet. */
     val userTier: BakeUserTier = BakeUserTier.FREE,
 )
@@ -38,18 +51,17 @@ data class ScheduleUiState(
  * `existingScheduledCount` observed from Room, feeding the same
  * [ScheduledBakePlanner.scheduleBake] gate the source uses.
  *
- * **Calendar event creation stays out of scope**, per direct
- * instruction — matches [BakeNotificationScheduler]'s own deferred
- * boundary. The source's own post-schedule "Bake Scheduled — Open
- * Calendar?" confirmation exists specifically to work around a real
- * SwiftUI `.sheet` + `.alert` dismissal-timing bug (an alert attached to
- * a view that's simultaneously dismissing as a sheet doesn't reliably
- * present) — that failure mode doesn't exist in Compose Navigation
- * (this screen is a normal nav destination, not a `.sheet`), so the
- * confirmation is shown directly by this screen itself rather than
- * being handed back to the caller to present, and simplified to a
- * single "OK" dismiss (no calendar prompt, since calendar creation
- * itself isn't wired up to prompt for).
+ * **The source's own post-schedule "Bake Scheduled — Add to Calendar?"
+ * confirmation is shown directly by this screen itself**, not handed
+ * back to a caller the way `CalculatorScreen.swift`'s own
+ * `scheduledConfirmation`/`addToCalendar` do it — that two-hop shape
+ * exists there to work around a real SwiftUI `.sheet` + `.alert`
+ * dismissal-timing bug (an alert attached to a view that's
+ * simultaneously dismissing as a sheet doesn't reliably present), which
+ * doesn't apply here (this screen is a normal Compose nav destination,
+ * not a `.sheet`). [addToCalendar] below is this screen's own
+ * counterpart of that same `addToCalendar(_:)` function, just called
+ * locally instead of on a `ScheduledBake` handed back up.
  */
 class ScheduleViewModel(
     private val plan: RawScheduledBakePlan,
@@ -98,6 +110,44 @@ class ScheduleViewModel(
                 }
             }
         }
+    }
+
+    /**
+     * `addToCalendar(_:)`. The Compose call site (`ScheduleScreen.kt`'s
+     * "Add to Calendar" button) is expected to have already ensured the
+     * `READ_CALENDAR`/`WRITE_CALENDAR` permission dialog was shown if
+     * needed before calling this — see [CalendarEventScheduler]'s own
+     * doc comment for why that has to happen at the Composable layer.
+     *
+     * Clears [scheduled] on BOTH success and failure — the confirmation
+     * dialog closes the instant this fires either way (matching the
+     * source's own alert-button-tap-always-dismisses behavior); a
+     * failure is then surfaced through the separate [calendarError]
+     * dialog instead of by keeping the original one open.
+     */
+    fun addToCalendar(scheduled: ScheduledBake) {
+        if (_uiState.value.addingToCalendar) return
+        _uiState.value = _uiState.value.copy(addingToCalendar = true)
+        viewModelScope.launch {
+            when (val result = CalendarEventScheduler.addBakeEvent(scheduled.name, scheduled.startTime, scheduled.targetFinishTime)) {
+                is CalendarEventResult.Success -> {
+                    scheduledBakeDao.updateCalendarEventId(scheduled.id, result.eventId)
+                    _uiState.value = _uiState.value.copy(addingToCalendar = false, scheduled = null)
+                }
+                is CalendarEventResult.Failure -> {
+                    _uiState.value = _uiState.value.copy(addingToCalendar = false, scheduled = null, calendarError = result.failure.message)
+                }
+            }
+        }
+    }
+
+    /** "No Thanks" / dismiss — closes the confirmation dialog without touching the calendar. */
+    fun dismissScheduledConfirmation() {
+        _uiState.value = _uiState.value.copy(scheduled = null)
+    }
+
+    fun clearCalendarError() {
+        _uiState.value = _uiState.value.copy(calendarError = null)
     }
 }
 

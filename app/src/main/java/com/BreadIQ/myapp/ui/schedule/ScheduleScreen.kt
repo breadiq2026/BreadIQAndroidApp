@@ -1,5 +1,9 @@
 package com.BreadIQ.myapp.ui.schedule
 
+import android.Manifest
+import android.content.pm.PackageManager
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -30,6 +34,7 @@ import androidx.compose.material3.TimePicker
 import androidx.compose.material3.rememberDatePickerState
 import androidx.compose.material3.rememberTimePickerState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -45,6 +50,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.core.content.ContextCompat
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.BreadIQ.myapp.core.HapticImpactStyle
 import com.BreadIQ.myapp.core.Haptics
@@ -83,6 +89,17 @@ import java.time.ZoneOffset
  * still validate live and gate the Schedule button exactly as before —
  * the authoritative gate was never the picker's own range in the first
  * place.
+ *
+ * **The post-schedule confirmation now matches the source's real
+ * two-button shape** (`CalculatorScreen.swift`'s `scheduledConfirmation`
+ * alert): "No Thanks" dismisses immediately; "Add to Calendar" calls
+ * [com.BreadIQ.myapp.core.CalendarEventScheduler.addBakeEvent] via
+ * [ScheduleViewModel.addToCalendar]. The `READ_CALENDAR`/`WRITE_CALENDAR`
+ * runtime permission is requested here, lazily, the moment the user taps
+ * "Add to Calendar" — not eagerly at app launch the way `POST_NOTIFICATIONS`/
+ * `SCHEDULE_EXACT_ALARM` are — see [com.BreadIQ.myapp.core.CalendarEventScheduler]'s
+ * own doc comment for why this call site can afford to be lazy where
+ * that one couldn't.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -135,20 +152,83 @@ fun ScheduleScreen(
         )
     }
 
-    state.scheduled?.let { scheduled ->
-        AlertDialog(
-            onDismissRequest = { onScheduled(scheduled) },
-            title = { Text("Bake Scheduled") },
-            text = {
-                Text(
-                    "\"${scheduled.name}\" is set. Start your bake at ${ScheduleModalFormatting.formatTime(scheduled.startTime)} " +
-                        "and your bread will be ready by ${ScheduleModalFormatting.formatTime(scheduled.targetFinishTime)}.",
+    // Remembers the just-scheduled bake across the confirmation dialog
+    // closing (state.scheduled goes back to null on "No Thanks" AND on
+    // addToCalendar resolving, either successfully or not — see
+    // ScheduleViewModel.addToCalendar's own doc comment) so the single
+    // navigate-away LaunchedEffect below still has something to pass,
+    // regardless of which of the three exit paths fired. Every dismiss
+    // handler below only clears ViewModel state, never calls
+    // onScheduled(...) itself — the `else` branch's LaunchedEffect is
+    // the ONE place that fires it, so all three paths converge on
+    // exactly one navigation call instead of racing to double-call it.
+    var confirmationBake by remember { mutableStateOf<ScheduledBake?>(null) }
+    LaunchedEffect(state.scheduled) {
+        state.scheduled?.let { confirmationBake = it }
+    }
+
+    val calendarPermissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestMultiplePermissions(),
+    ) { results ->
+        val granted = results[Manifest.permission.READ_CALENDAR] == true && results[Manifest.permission.WRITE_CALENDAR] == true
+        confirmationBake?.let { bake ->
+            if (granted) {
+                viewModel.addToCalendar(bake)
+            } else {
+                // Denied — same end state as "No Thanks", no error dialog
+                // (matches addBakeEvent's own AccessDenied message only
+                // firing when addBakeEvent is actually attempted).
+                viewModel.dismissScheduledConfirmation()
+            }
+        }
+    }
+
+    confirmationBake?.let { bake ->
+        when {
+            state.scheduled != null -> {
+                AlertDialog(
+                    onDismissRequest = { if (!state.addingToCalendar) viewModel.dismissScheduledConfirmation() },
+                    title = { Text("Bake Scheduled") },
+                    text = { Text(ScheduleModalFormatting.scheduledConfirmationMessage(bake.name, bake.startTime, bake.targetFinishTime)) },
+                    dismissButton = {
+                        TextButton(
+                            enabled = !state.addingToCalendar,
+                            onClick = { viewModel.dismissScheduledConfirmation() },
+                        ) { Text("No Thanks") }
+                    },
+                    confirmButton = {
+                        TextButton(
+                            enabled = !state.addingToCalendar,
+                            onClick = {
+                                val hasAccess = ContextCompat.checkSelfPermission(context, Manifest.permission.READ_CALENDAR) == PackageManager.PERMISSION_GRANTED &&
+                                    ContextCompat.checkSelfPermission(context, Manifest.permission.WRITE_CALENDAR) == PackageManager.PERMISSION_GRANTED
+                                if (hasAccess) {
+                                    viewModel.addToCalendar(bake)
+                                } else {
+                                    calendarPermissionLauncher.launch(arrayOf(Manifest.permission.READ_CALENDAR, Manifest.permission.WRITE_CALENDAR))
+                                }
+                            },
+                        ) { Text(if (state.addingToCalendar) "Adding…" else "Add to Calendar") }
+                    },
                 )
-            },
-            confirmButton = {
-                TextButton(onClick = { onScheduled(scheduled) }) { Text("OK") }
-            },
-        )
+            }
+            state.calendarError != null -> {
+                val calendarError = state.calendarError.orEmpty()
+                AlertDialog(
+                    onDismissRequest = { viewModel.clearCalendarError() },
+                    title = { Text("Couldn't Add to Calendar") },
+                    text = { Text(calendarError) },
+                    confirmButton = {
+                        TextButton(onClick = { viewModel.clearCalendarError() }) { Text("OK") }
+                    },
+                )
+            }
+            else -> {
+                // Both scheduled and calendarError are null again — every
+                // exit path above lands here exactly once; navigate away.
+                LaunchedEffect(bake) { onScheduled(bake) }
+            }
+        }
     }
 }
 

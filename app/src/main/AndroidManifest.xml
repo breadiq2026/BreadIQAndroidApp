@@ -17,6 +17,13 @@
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" />
 
+    <!-- Calendar integration (PORTING_PLAN.md step 7). Both are runtime
+         (dangerous) permissions on all supported API levels — requested
+         lazily, right when the user taps "Add to Calendar" on the
+         Schedule screen, see ScheduleScreen.kt's own doc comment. -->
+    <uses-permission android:name="android.permission.READ_CALENDAR" />
+    <uses-permission android:name="android.permission.WRITE_CALENDAR" />
+
     <application
         android:name=".BreadIQApplication"
         android:allowBackup="true"

@@ -2,6 +2,7 @@ package com.BreadIQ.myapp
 
 import android.app.Application
 import com.BreadIQ.myapp.core.BakeNotificationScheduler
+import com.BreadIQ.myapp.core.CalendarEventScheduler
 import com.BreadIQ.myapp.data.local.DatabaseProvider
 
 /**
@@ -32,6 +33,10 @@ import com.BreadIQ.myapp.data.local.DatabaseProvider
  * (`UNUserNotificationCenter` needs no app-launch setup on iOS; a
  * notification *channel*, required on Android's API 26+, is the one
  * piece of setup Android needs that iOS doesn't).
+ *
+ * [CalendarEventScheduler.init] is called eagerly here for the same
+ * reason as `BakeNotificationScheduler.init` — see that object's own
+ * doc comment.
  */
 class BreadIQApplication : Application() {
     override fun onCreate() {
@@ -39,5 +44,6 @@ class BreadIQApplication : Application() {
         DatabaseProvider.getInstance(this)
         BakeNotificationScheduler.init(this)
         BakeNotificationScheduler.createNotificationChannel(this)
+        CalendarEventScheduler.init(this)
     }
 }

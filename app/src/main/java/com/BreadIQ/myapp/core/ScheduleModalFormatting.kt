@@ -35,7 +35,19 @@ object ScheduleModalFormatting {
         return if (m > 0) "${h}h ${m}m" else "${h}h"
     }
 
-    /** `handleSchedule`'s post-success confirmation body text. */
+    /**
+     * `scheduledConfirmation`'s post-success alert body text —
+     * `CalculatorScreen.swift`'s own `onScheduled` closure, not this
+     * function's own source file. **Text corrected to match**: this
+     * function's iOS source (`ScheduleModalFormatting.swift`) has been
+     * genuinely unused dead code since before this port started (zero
+     * call sites, confirmed directly), and had drifted from the real
+     * live copy — its old text ended "Open Calendar at your bake start
+     * time?" where the actual `CalculatorScreen.swift` call site (and
+     * this screen's real confirmation dialog) both end "Add this to
+     * your Calendar?". Updated here rather than left diverging, then
+     * wired into that dialog for real — see `ScheduleScreen.kt`.
+     */
     fun scheduledConfirmationMessage(bakeName: String, startTime: Instant, targetFinishTime: Instant): String =
-        "\"$bakeName\" is set. Start your bake at ${formatTime(startTime)} and your bread will be ready by ${formatTime(targetFinishTime)}.\n\nOpen Calendar at your bake start time?"
+        "\"$bakeName\" is set. Start your bake at ${formatTime(startTime)} and your bread will be ready by ${formatTime(targetFinishTime)}.\n\nAdd this to your Calendar?"
 }

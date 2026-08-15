@@ -34,6 +34,20 @@ interface ScheduledBakeDao {
     suspend fun deleteById(id: String)
 
     /**
+     * Narrow patch of just the `calendarEventId` column — same "patch
+     * the one id, don't rewrite the row" pattern as
+     * `BakeSessionDao.updateStepNotificationIds`/`updateOvenPreheatNotifId`
+     * from the notifications session. Written by
+     * [com.BreadIQ.myapp.viewmodel.ScheduleViewModel.addToCalendar] after
+     * [com.BreadIQ.myapp.core.CalendarEventScheduler.addBakeEvent]
+     * succeeds — the Android counterpart of the source setting
+     * `scheduled.calendarEventId` directly on its SwiftData model and
+     * calling `modelContext.save()`.
+     */
+    @Query("UPDATE scheduled_bakes SET calendarEventId = :calendarEventId WHERE id = :id")
+    suspend fun updateCalendarEventId(id: String, calendarEventId: String?)
+
+    /**
      * Assembles the full [ScheduledBake] domain object — see
      * `ScheduledBakeEntity.kt`'s own doc comment for why this is two
      * explicit queries in one transaction rather than a nested `@Relation`.

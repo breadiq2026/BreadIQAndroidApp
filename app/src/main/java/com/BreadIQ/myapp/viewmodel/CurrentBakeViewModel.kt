@@ -7,6 +7,7 @@ import androidx.lifecycle.viewModelScope
 import com.BreadIQ.myapp.core.BakeNotificationScheduler
 import com.BreadIQ.myapp.core.BakeSessionEngine
 import com.BreadIQ.myapp.core.BakeStartResult
+import com.BreadIQ.myapp.core.CalendarEventScheduler
 import com.BreadIQ.myapp.core.RawBakeStep
 import com.BreadIQ.myapp.data.local.BakeSessionDao
 import com.BreadIQ.myapp.data.local.DatabaseProvider
@@ -126,16 +127,26 @@ class CurrentBakeViewModel(
 
     /**
      * The dialog that triggers this promises "Push notifications will
-     * be removed" — [BakeNotificationScheduler.cancel] is stubbed (see
-     * that object's own doc comment), so this doesn't actually do that
-     * yet. Real `EKEvent`/`CalendarContract` removal for
-     * `bake.calendarEventId` is likewise deferred — calendar integration
-     * is its own not-yet-ported platform item.
+     * be removed" — both `BakeNotificationScheduler.cancel` calls below
+     * are real now (notifications session); `startReminderNotifId`/
+     * `startTimeNotifId` are still harmless no-ops today regardless,
+     * since nothing in the app populates them yet (see
+     * `ScheduledBakePlanner`'s own doc comment — a real, pre-existing
+     * iOS scope gap, not something this port is missing).
+     *
+     * Also removes the real `CalendarContract` event
+     * `ScheduleViewModel.addToCalendar` may have created for this bake
+     * (calendar-integration session) — this was previously the one
+     * still-silent no-op here, leaving orphaned calendar events behind
+     * on every cancel.
      */
     fun removeScheduled(bake: ScheduledBake) {
         BakeNotificationScheduler.cancel(bake.startReminderNotifId)
         BakeNotificationScheduler.cancel(bake.startTimeNotifId)
-        viewModelScope.launch { scheduledBakeDao.deleteById(bake.id) }
+        viewModelScope.launch {
+            bake.calendarEventId?.let { CalendarEventScheduler.removeBakeEvent(it) }
+            scheduledBakeDao.deleteById(bake.id)
+        }
     }
 
     fun togglePause(session: BakeSession) {

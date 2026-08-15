@@ -616,10 +616,82 @@ Concrete order:
      was the one still-silent no-op left in that function after last
      session's notification-cancel wiring, and was leaving orphaned
      calendar events behind on every cancel.
-   - XLSX export -- `RecipeXLSXBuilder.swift`, `RecipeXLSXExporter.swift`,
-     `RecipeXLSXStyles.swift`, `XLSXWorkbook.swift`, `XLSXWorkbookXML.swift`
-     (~55KB combined) -> same manual XML/zip construction ports directly;
-     Storage Access Framework for the share/save step.
+   - XLSX export ("Share Recipe") -- `RecipeXLSXBuilder.swift`,
+     `RecipeXLSXExporter.swift`, `RecipeXLSXStyles.swift`,
+     `XLSXWorkbook.swift`, `XLSXWorkbookXML.swift`, `TechniqueGuideLookup.swift`
+     -- ✅ done 2026-08-14, 1 commit.
+
+     **`java.util.zip.ZipOutputStream`/`ZipEntry` (standard JDK) replaces
+     the source's `ZIPFoundation` SPM dependency** -- a real
+     simplification the platform gives for free, not a gap; no new
+     Gradle dependency needed for the zip-container half at all. The
+     cell/style/worksheet model and its dedup logic
+     (`core/XLSXWorkbook.kt`) port directly -- `XLSXStyle` is a Kotlin
+     `data class` (structural `equals`/`hashCode`, the direct
+     counterpart of the source's `Hashable` struct), usable as a `Map`
+     key the same way, with every cell pre-scanned before `styles.xml`
+     generation so its dedup indices are stable. `core/XLSXWorkbookXML.kt`
+     ports the OOXML part templates as Kotlin extension functions on
+     `XLSXWorkbook.Companion` (`XLSXWorkbook.stylesXML(...)` etc.) --
+     same call-site shape as the source's own `static func`s split
+     into a second file. The reserved-slot font/fill/border index-offset
+     math (`i+1`/`i+2`/`i+1`) is load-bearing, ported exactly, not
+     re-derived. `core/RecipeXLSXStyles.kt` ports the palette hex-for-hex
+     and the row/section builder functions unchanged.
+     `core/RecipeXLSXBuilder.kt` ports the section-by-section sheet
+     population with the same gating conditions as the source
+     (preferment tables only when a preferment is used, production
+     schedule only when proof stages exist, banners only when their
+     trigger fields are present) -- confirmed no embedded logo, per the
+     source's own documented decision (this app has no wordmark asset).
+
+     **A real bug caught and fixed while porting `RecipeXLSXExporter.kt`**:
+     the flour-blend-breakdown gate must be `context.flourBlend.size > 1`
+     (the raw list size), not "count of positive-percent entries > 1" --
+     an initial draft used the latter, which would silently collapse a
+     multi-entry blend with a zero-percent placeholder down to a single
+     un-broken-down "Flour" row instead of the "Flour (total)" breakdown
+     the source always shows once the blend has more than one slot.
+     Caught before committing, not shipped.
+
+     `core/TechniqueGuideLookup.kt` -- the one file in this item that
+     wasn't already ported (`model/TechniqueGuideCatalog.kt`/`TechniqueGuide.kt`,
+     the six real technique catalogs, were already ported and sitting
+     unused on Android). Ports the `KNEADING[style] ?? KNEADING.artisan`-style
+     fallback chain, the `soft_roll` shaping-steps filter (depends on the
+     specific shape -- dinner roll vs. burger bun vs. hoagie vs.
+     pullman), and the "Divide After Bulk"/"Portion After Bulk" row math
+     (a real per-shape `piecesPerUnit` table -- bagels/pretzels divide
+     into 6, most rolls into 13, `em_`-prefixed shapes into 12) exactly,
+     including the documented real drift between this export-specific
+     logic and the on-screen `DivideInfo` component's simpler version
+     (which the source itself flags as NOT what this export should use).
+
+     **The one genuinely new piece of infrastructure**: a real
+     `FileProvider` (`AndroidManifest.xml` `<provider>` +
+     `res/xml/file_paths.xml`, a `<cache-path>` scoped to the app's cache
+     dir only) -- nothing in this app had one before. `CalculatorViewModel.shareRecipe()`
+     writes the built `.xlsx` bytes to `Context.cacheDir`, gets a
+     `content://` `Uri` via `FileProvider.getUriForFile`, and surfaces it
+     through a new one-shot `CalculatorUiState.shareFileUri` field --
+     same "state field the Composable observes once, then clears"
+     convention as the existing `upgradePromptTitle`/`upgradePromptBody`
+     pair, not a new Channel/SharedFlow mechanism. `CalculatorScreen.kt`
+     launches a real `Intent.ACTION_SEND` chooser
+     (`FLAG_GRANT_READ_URI_PERMISSION`, MIME type
+     `application/vnd.openxmlformats-officedocument.spreadsheetml.sheet`)
+     off that field, the direct analog of the source's
+     `UIActivityViewController`.
+
+     **Wired now, gated on the real (currently-always-FREE) `isPremium`
+     check, per direct instruction -- did not wait for RevenueCat.**
+     `CalculatorResultsCard.kt`'s "Share Recipe" button is no longer
+     disabled; `userTier` stays hardcoded `BakeUserTier.FREE` (a separate,
+     already-planned item), so today this always shows the upgrade
+     prompt -- exactly matching what a FREE-tier user sees on iOS right
+     now, and switching on automatically with zero further changes once
+     RevenueCat lands, same reasoning already applied to
+     `isPremium`/`isBasicOrPremium` elsewhere in that file.
    - Chrome extension pairing-code redeem -- smallest of these, just needs
      the authenticated Supabase session that already exists from step 2/3.
 8. **Remaining smaller screens sweep** -- `SettingsScreen.swift`,

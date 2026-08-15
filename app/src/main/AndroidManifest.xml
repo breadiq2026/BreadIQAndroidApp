@@ -66,6 +66,25 @@
         <receiver
             android:name=".core.BakeNotificationReceiver"
             android:exported="false" />
+
+        <!-- XLSX recipe export (PORTING_PLAN.md step 7, "Share Recipe").
+             CalculatorViewModel.shareRecipe() writes the exported .xlsx to
+             Context.cacheDir, then needs a content:// Uri to hand to an
+             ACTION_SEND chooser — a plain file:// Uri would violate
+             FileUriExposedException on API 24+. See res/xml/file_paths.xml
+             for the exposed path (cache dir only). Not exported: only this
+             app's own FileProvider.getUriForFile(...) calls create Uris for
+             it; grantUriPermissions lets the receiving share-target app
+             read that one Uri temporarily without any broader access. -->
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="${applicationId}.fileprovider"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/file_paths" />
+        </provider>
     </application>
 
 </manifest>

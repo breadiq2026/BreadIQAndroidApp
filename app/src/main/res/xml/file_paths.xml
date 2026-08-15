@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Backs the FileProvider declared in AndroidManifest.xml — used so far
+  only by CalculatorViewModel.shareRecipe() (PORTING_PLAN.md step 7,
+  XLSX recipe export), which writes the exported .xlsx to
+  Context.cacheDir before sharing it via an ACTION_SEND chooser. A
+  single <cache-path> rooted at "." is enough: the exported file only
+  ever needs to live in the app's cache directory, nowhere else.
+-->
+<paths xmlns:android="http://schemas.android.com/apk/res/android">
+    <cache-path name="shared_exports" path="." />
+</paths>

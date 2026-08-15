@@ -1,5 +1,6 @@
 package com.BreadIQ.myapp.ui.calculator
 
+import android.content.Intent
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -27,6 +28,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
@@ -176,6 +178,22 @@ fun CalculatorScreen(
                 TextButton(onClick = { viewModel.update { it.copy(upgradePromptTitle = null, upgradePromptBody = null) } }) { Text("OK") }
             },
         )
+    }
+
+    // "Share Recipe" — launches the system share chooser for the .xlsx
+    // CalculatorViewModel.shareRecipe() just wrote to cache, then clears
+    // the one-shot state field back to null, same fire-once shape as the
+    // upgrade-prompt/startedSessionId handoffs elsewhere in this file.
+    state.shareFileUri?.let { uri ->
+        LaunchedEffect(uri) {
+            val sendIntent = Intent(Intent.ACTION_SEND).apply {
+                type = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                putExtra(Intent.EXTRA_STREAM, uri)
+                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            }
+            context.startActivity(Intent.createChooser(sendIntent, "Share Recipe"))
+            viewModel.clearShareFileUri()
+        }
     }
 }
 

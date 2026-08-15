@@ -76,12 +76,14 @@ import com.BreadIQ.myapp.viewmodel.sweetMeta
  * here now so this file doesn't need to change shape again once that
  * step lands, only the call site.
  *
- * **Queue for Later, Start Now, and Schedule Bake are all wired for
- * real** — `BakeSessionEngine`/`BakeStepAssembler` (bake-session-engine
- * session) and the Queue/CurrentBake/Schedule screens (this session)
- * closed the last gaps. **Share Recipe still renders disabled** —
- * `RecipeXLSXExporter` remains out of scope — per direct instruction to
- * show deferred-flow controls as visibly disabled rather than omit them.
+ * **Queue for Later, Start Now, Schedule Bake, and Share Recipe are all
+ * wired for real now** — `BakeSessionEngine`/`BakeStepAssembler`
+ * (bake-session-engine session), the Queue/CurrentBake/Schedule screens,
+ * and `RecipeXLSXExporter` (XLSX export session) closed the last gaps.
+ * Share Recipe's Premium gate is untouched — `userTier` stays hardcoded
+ * to `BakeUserTier.FREE` until the RevenueCat session lands (a separate,
+ * already-planned item), so today this button always shows the upgrade
+ * prompt, exactly matching what a FREE-tier user sees on iOS right now.
  *
  * [onStartedBake] fires once [CalculatorViewModel.handleStartBake]
  * succeeds, carrying the new session id — the caller (`CalculatorScreen`
@@ -196,7 +198,8 @@ internal fun CardCalculateResults(
             )
             BreadIQButton(
                 label = if (state.isPremium) "Share Recipe" else "🔒 Share Recipe — Premium",
-                variant = BreadIQButtonVariant.SECONDARY, disabled = true, fullWidth = true, onClick = {},
+                variant = BreadIQButtonVariant.SECONDARY, disabled = false, fullWidth = true,
+                onClick = { viewModel.shareRecipe() },
             )
         }
     }

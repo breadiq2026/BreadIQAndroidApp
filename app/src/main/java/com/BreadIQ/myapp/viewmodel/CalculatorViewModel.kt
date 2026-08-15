@@ -1,6 +1,8 @@
 package com.BreadIQ.myapp.viewmodel
 
 import android.content.Context
+import android.net.Uri
+import androidx.core.content.FileProvider
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
@@ -16,6 +18,8 @@ import com.BreadIQ.myapp.core.ProofStageNarrator
 import com.BreadIQ.myapp.core.ProofTimeCalculator
 import com.BreadIQ.myapp.core.ProofTimeInput
 import com.BreadIQ.myapp.core.RawScheduledBakePlan
+import com.BreadIQ.myapp.core.RecipeXLSXExportContext
+import com.BreadIQ.myapp.core.RecipeXLSXExporter
 import com.BreadIQ.myapp.core.swiftRounded
 import com.BreadIQ.myapp.data.TemperatureUnitStore
 import com.BreadIQ.myapp.data.local.BakeSessionDao
@@ -47,10 +51,13 @@ import com.BreadIQ.myapp.model.prefermentTypes
 import com.BreadIQ.myapp.model.QueuedBake
 import com.BreadIQ.myapp.model.QueuedBakeConfig
 import com.BreadIQ.myapp.model.QueuedBakeStepPlan
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import java.io.File
 
 /**
  * The `@State` list of the iOS app's `Screens/CalculatorScreen.swift`, as
@@ -135,6 +142,13 @@ data class CalculatorUiState(
     val startingBake: Boolean = false,
     /** Consumed once by the screen's own nav handoff to Bake Detail once Start Now succeeds. */
     val startedSessionId: String? = null,
+    /**
+     * Consumed once by the screen's own `ACTION_SEND` share-sheet launch
+     * once [CalculatorViewModel.shareRecipe] finishes writing the `.xlsx`
+     * file — same one-shot-then-cleared convention as [startedSessionId]/
+     * [upgradePromptTitle] below.
+     */
+    val shareFileUri: Uri? = null,
 
     // Save recipe
     val recipeName: String = "",
@@ -251,6 +265,8 @@ class CalculatorViewModel(
     private val ingredientPriceOverrideDao: IngredientPriceOverrideDao,
     private val bakeSessionDao: BakeSessionDao,
     temperatureUnitStore: TemperatureUnitStore,
+    /** Only used by [shareRecipe] (writing the exported `.xlsx` to cache + building its `FileProvider` `Uri`) — an application [Context], never a leak-risk Activity one, same as every other app-Context-holding object in this codebase. */
+    private val appContext: Context,
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(CalculatorUiState(temperatureUnit = temperatureUnitStore.unit))
@@ -731,6 +747,64 @@ class CalculatorViewModel(
     }
 
     fun clearStartedSessionId() = update { it.copy(startedSessionId = null) }
+
+    /**
+     * `handleShareRecipe()` — builds a real styled `.xlsx` document
+     * ([RecipeXLSXExporter]) and shares it as a file. The Premium gate
+     * itself is the same [showUpgradeAlert] call/copy already used
+     * elsewhere in this ViewModel.
+     *
+     * Writes to [Context.getCacheDir] (not
+     * `FileManager.default.temporaryDirectory` the way the source does —
+     * the Android counterpart is the app's cache directory, which is
+     * exactly what this app's new `FileProvider` `<cache-path>` exposes)
+     * and surfaces the resulting content [Uri] via
+     * [CalculatorUiState.shareFileUri] for the Composable to launch an
+     * `ACTION_SEND` chooser with, then clear back to `null` — this
+     * ViewModel has no Activity to present a share sheet from itself,
+     * same Context/Activity boundary every other picker/share-needing
+     * feature in this app already established.
+     *
+     * Silently no-ops on any build/write failure, matching the source's
+     * own `guard let data = try? ... else { return }` /
+     * `guard (try? data.write(to:)) != nil else { return }` shape.
+     */
+    fun shareRecipe() {
+        val s = _uiState.value
+        if (!s.isPremium) {
+            showUpgradeAlert("Recipe Export", "Export and share your full recipe — weights, baker's percentages, and proof timeline. Available on Premium.")
+            return
+        }
+        val formulaResult = s.formulaResult ?: return
+        val proofResult = s.proofResult ?: return
+
+        val exportContext = RecipeXLSXExportContext(
+            formulaResult = formulaResult, proofResult = proofResult, recipeName = s.recipeName,
+            styleValue = s.selectedStyle.value, styleLabel = s.selectedStyle.label,
+            shapeValue = s.selectedShapeValue, shapeLabel = s.currentShapeName, numLoaves = s.numLoaves.toInt(),
+            hydrationPercent = s.hydration, flourBlend = s.flourBlend,
+            usePrefermant = s.usePrefermant, prefermentType = s.prefermentType,
+            yeastLabel = s.yeastMeta.label, yeastFactor = s.yeastMeta.factor, sweetenerLabel = s.sweetMeta?.label,
+            isHumidityMode = s.isHumidityMode, relativeHumidity = s.relativeHumidity,
+        )
+
+        viewModelScope.launch {
+            val uri = try {
+                withContext(Dispatchers.IO) {
+                    val bytes = RecipeXLSXExporter.build(exportContext)
+                    val filename = RecipeXLSXExporter.filename(s.selectedStyle.label)
+                    val file = File(appContext.cacheDir, filename)
+                    file.writeBytes(bytes)
+                    FileProvider.getUriForFile(appContext, "${appContext.packageName}.fileprovider", file)
+                }
+            } catch (e: Exception) {
+                null
+            }
+            if (uri != null) update { it.copy(shareFileUri = uri) }
+        }
+    }
+
+    fun clearShareFileUri() = update { it.copy(shareFileUri = null) }
 }
 
 /**
@@ -750,6 +824,7 @@ class CalculatorViewModelFactory(private val context: Context) : ViewModelProvid
             ingredientPriceOverrideDao = db.ingredientPriceOverrideDao(),
             bakeSessionDao = db.bakeSessionDao(),
             temperatureUnitStore = TemperatureUnitStore(prefs),
+            appContext = appContext,
         ) as T
     }
 }

@@ -428,7 +428,78 @@ Concrete order:
      its call site, `RootView`'s bake-session reconciliation, doesn't
      exist on Android yet (see step 3's own narrower-than-`RootView`
      scope note above).
-   - Calendar -- `CalendarEventScheduler.swift` -> `CalendarContract`.
+   - Calendar -- `CalendarEventScheduler.swift` -- ✅ done 2026-08-14,
+     1 commit. Real `CalendarContract`/`ContentResolver` event creation
+     via a new `core/CalendarEventScheduler.kt`, the Android counterpart
+     of `EKEventStore`/`EKEvent` -- matches the source's own real
+     `EventKit` upgrade over the original RN app's `calshow:` deep-link
+     no-op (confirmed directly against `lib/calendar.ts`'s 34 lines and
+     its own "no native module calls" comment -- the source's upgrade
+     really is the first code that ever writes a real value into
+     `ScheduledBake.calendarEventId`).
+
+     `requestAccess()` is a permission *check* here (`READ_CALENDAR`/
+     `WRITE_CALENDAR`), not a request -- same Context-boundary reasoning
+     as `BakeNotificationScheduler`'s `POST_NOTIFICATIONS` split last
+     session: Android's system permission dialog needs a live Activity's
+     `ActivityResultLauncher`, which this object doesn't have. Unlike
+     that session, though, this permission has exactly one interactive
+     call site (`ScheduleScreen.kt`'s new "Add to Calendar" button), so
+     it's requested lazily right there via `rememberLauncherForActivityResult`
+     the moment the user taps it -- much closer to the source's own
+     lazy `requestAccess()` call than the notifications session could
+     manage with its many non-interactive call sites.
+
+     `addBakeEvent`/`removeBakeEvent` are both `suspend`, dispatched on
+     `Dispatchers.IO` (`ContentResolver` calls are blocking I/O). The
+     default-calendar lookup (`store.defaultCalendarForNewEvents ??
+     store.calendars(for: .event).first`) walks `CalendarContract.Calendars`
+     preferring the primary calendar, falling back to the first
+     genuinely writable one (`CALENDAR_ACCESS_LEVEL >= CAL_ACCESS_CONTRIBUTOR`,
+     skipping read-only subscribed calendars like holidays) -- `null`
+     surfaces as the same "No calendar is available" failure message the
+     source uses.
+
+     Object holds a plain application `Context` field (`init`, called
+     from `BreadIQApplication.onCreate()`), the same shape
+     `BakeNotificationScheduler` already established -- reached from two
+     call sites (`ScheduleViewModel.addToCalendar`,
+     `CurrentBakeViewModel.removeScheduled`) that don't otherwise carry
+     a `Context`.
+
+     **`ScheduleScreen.kt`'s post-schedule confirmation now matches the
+     source's real two-button shape** (`CalculatorScreen.swift`'s
+     `scheduledConfirmation` alert: "No Thanks" / "Add to Calendar"),
+     replacing last session's placeholder single-"OK" dismiss -- that
+     simplification was written before this session's real calendar
+     scheduler existed to give the second button something to call. A
+     separate "Couldn't Add to Calendar" dialog surfaces failures,
+     matching the source's distinct `calendarEventError` alert. All
+     three exit paths (dismiss/"No Thanks", the error dialog's OK, and a
+     successful add) converge on a single `LaunchedEffect`-driven
+     navigate-away rather than each calling the nav callback directly --
+     avoids a double-navigation bug where both an explicit tap handler
+     and a state-driven effect could each fire it once for the same
+     outcome.
+
+     **Fixed a genuine content-drift bug while wiring this in**:
+     `ScheduleModalFormatting.scheduledConfirmationMessage` -- present in
+     both codebases, called from neither -- had drifted from the real
+     live copy (`CalculatorScreen.swift`'s own inline
+     `scheduledConfirmation` text): the dead function's question ended
+     "Open Calendar at your bake start time?" where the actual live
+     alert ends "Add this to your Calendar?". Corrected the function's
+     text to match reality, then wired it into the dialog for real
+     instead of leaving two diverging copies of the same string.
+
+     `ScheduledBakeDao` gained one narrow `updateCalendarEventId` query,
+     same "patch one column" pattern as last session's
+     `updateStepNotificationIds`/`updateOvenPreheatNotifId`.
+     `CurrentBakeViewModel.removeScheduled` now actually calls
+     `removeBakeEvent` for `bake.calendarEventId` when present -- this
+     was the one still-silent no-op left in that function after last
+     session's notification-cancel wiring, and was leaving orphaned
+     calendar events behind on every cancel.
    - XLSX export -- `RecipeXLSXBuilder.swift`, `RecipeXLSXExporter.swift`,
      `RecipeXLSXStyles.swift`, `XLSXWorkbook.swift`, `XLSXWorkbookXML.swift`
      (~55KB combined) -> same manual XML/zip construction ports directly;

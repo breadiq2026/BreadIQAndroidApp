@@ -368,8 +368,66 @@ Concrete order:
    - Camera scan/import -- `RecipeScanner.swift`, `ImportAnalyzer.swift`,
      `ImportModal.swift`, `ImportReviewScreen.swift` (~93KB combined, the
      biggest of these) -> CameraX + on-device text recognition (ML Kit).
-   - Push notifications -- `BakeNotificationScheduler.swift` -> WorkManager +
-     notification channels.
+   - Push notifications -- `BakeNotificationScheduler.swift` -- ✅ done
+     2026-08-14, 1 commit. Real bodies for `core/BakeNotificationScheduler.kt`'s
+     four stub functions (`afterStart`, `cancel`, `syncAfterMutation`,
+     `cancelEverything`) -- no ViewModel call site changed, only the
+     stub bodies. Reuses `BakeSessionEngine.ovenPreheatFireTime`/
+     `wantsCoilFolds`/`coilFoldFireTimes` and `BakeStepContentLookup`'s
+     copy, both already ported.
+
+     **`AlarmManager` + a `BroadcastReceiver`, not `WorkManager`** --
+     this plan's original note undersold it. The source deliberately
+     upgraded to `UNCalendarNotificationTrigger`'s absolute-time firing
+     specifically to avoid OS-scheduling drift; `WorkManager`'s
+     minimum-latency/Doze-batching model would reintroduce exactly that
+     drift, so `AlarmManager.setExactAndAllowWhileIdle` (via the new
+     `core/BakeNotificationReceiver.kt`, which posts the actual
+     notification at fire time) is the real equivalent. A notification
+     channel is created once in `BreadIQApplication.onCreate()`.
+
+     `BakeNotificationScheduler` holds a plain application `Context`
+     field (`init(context)`, called from `BreadIQApplication.onCreate()`)
+     rather than constructor injection -- none of the four ViewModels
+     that call it carry a `Context` themselves (same boundary
+     `Haptics.kt` already established), and unlike haptics this object
+     has no Composable call site to fire a Context-needing action from.
+     It also now holds a `BakeSessionDao` reference (two new narrow
+     `UPDATE` queries, `updateStepNotificationIds`/`updateOvenPreheatNotifId`)
+     to persist the ids scheduling produces -- the Android counterpart of
+     the source mutating its SwiftData model in place and calling
+     `modelContext.save()`, not a new layering violation (the source
+     already blends persistence into this same file).
+
+     `POST_NOTIFICATIONS` is requested once, early, from `MainActivity`
+     rather than lazily at the first schedule call the way the source's
+     `requestAuthorization()` is -- Android's runtime permission dialog
+     needs a live Activity's `ActivityResultLauncher`, which no
+     ViewModel has; every real `schedule()` call still checks permission
+     itself first and silently skips otherwise, matching the source's
+     own guard. `SCHEDULE_EXACT_ALARM` (not `USE_EXACT_ALARM`, which
+     Play policy restricts to alarm-clock/calendar apps) is requested
+     the same way, via a Settings deep link on API 33+ since it has no
+     in-app dialog there; a revoked grant degrades real schedule calls
+     to an inexact `AlarmManager.set` rather than dropping the
+     notification, a middle ground the source has no equivalent for.
+
+     **Known gap, deliberately not solved this session**: `AlarmManager`
+     alarms don't survive a reboot (iOS local notifications do). Left as
+     a TODO doc comment on `BakeNotificationScheduler.kt` -- a
+     `BOOT_COMPLETED` receiver reconstructing every active session's
+     pending notifications from Room is real additional scope for a
+     future session, not built here.
+
+     `ScheduledBakePlanner`'s `startReminderNotifId`/`startTimeNotifId`
+     stay unused -- verified directly against
+     `ScheduledBakePlanner.swift`, which never calls its own scheduling
+     function for those either; a real, pre-existing iOS scope gap, not
+     something this port introduced. `sweepOrphanedNotifications`
+     (the source's startup orphan-cleanup sweep) also isn't ported --
+     its call site, `RootView`'s bake-session reconciliation, doesn't
+     exist on Android yet (see step 3's own narrower-than-`RootView`
+     scope note above).
    - Calendar -- `CalendarEventScheduler.swift` -> `CalendarContract`.
    - XLSX export -- `RecipeXLSXBuilder.swift`, `RecipeXLSXExporter.swift`,
      `RecipeXLSXStyles.swift`, `XLSXWorkbook.swift`, `XLSXWorkbookXML.swift`

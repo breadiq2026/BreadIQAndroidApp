@@ -48,6 +48,7 @@ import com.BreadIQ.myapp.screens.AuthScreen
 import com.BreadIQ.myapp.ui.bakedetail.BakeDetailScreen
 import com.BreadIQ.myapp.ui.calculator.AutolyseGuidanceScreen
 import com.BreadIQ.myapp.ui.calculator.CalculatorScreen
+import com.BreadIQ.myapp.ui.calculator.ImportScreen
 import com.BreadIQ.myapp.ui.calculator.NutritionAnalysisScreen
 import com.BreadIQ.myapp.ui.currentbake.CurrentBakeScreen
 import com.BreadIQ.myapp.ui.lexicon.LexiconScreen
@@ -216,6 +217,7 @@ fun BreadIQApp() {
                     viewModel = calculatorViewModel,
                     onOpenNutrition = { navController.navigate(BreadIQRoutes.NUTRITION_ANALYSIS) },
                     onOpenAutolyse = { navController.navigate(BreadIQRoutes.AUTOLYSE_GUIDANCE) },
+                    onOpenImport = { navController.navigate(BreadIQRoutes.IMPORT) },
                     onStartedBake = { sessionId -> navController.navigate("bake_detail/$sessionId") },
                     onScheduleBake = { plan ->
                         pendingSchedulePlan = plan
@@ -248,6 +250,13 @@ fun BreadIQApp() {
                 val calculatorViewModel: CalculatorViewModel = viewModel(parentEntry, factory = CalculatorViewModelFactory(context))
                 val state by calculatorViewModel.uiState.collectAsStateWithLifecycle()
                 AutolyseGuidanceScreen(guidance = state.autolyseGuidance, onDismiss = { navController.popBackStack() })
+            }
+            // Does NOT read from the Calculator route's shared CalculatorViewModel
+            // the way the two routes above do — ImportScreen is genuinely
+            // self-contained (its own ImportViewModel, no "Apply to
+            // Calculator" action), see its own doc comment.
+            composable(BreadIQRoutes.IMPORT) {
+                ImportScreen(onClose = { navController.popBackStack() })
             }
             composable(BreadIQDestination.RECIPES.route) {
                 RecipesScreen(

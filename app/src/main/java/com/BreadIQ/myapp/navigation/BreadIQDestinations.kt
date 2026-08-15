@@ -50,6 +50,17 @@ object BreadIQRoutes {
     const val AUTOLYSE_GUIDANCE = "autolyse_guidance"
 
     /**
+     * Pushed from Calculator's "Import" header button. Unlike
+     * [NUTRITION_ANALYSIS]/[AUTOLYSE_GUIDANCE], this route does NOT share
+     * the Calculator route's `CalculatorViewModel` — `ImportScreen` is
+     * genuinely self-contained (its own `ImportViewModel`, no "Apply to
+     * Calculator" action, confirmed directly against `ImportModal.swift`,
+     * which is presented with only an `onClose` callback) — see
+     * `ImportScreen.kt`'s own doc comment.
+     */
+    const val IMPORT = "import"
+
+    /**
      * Pushed from Calculator's "Schedule Bake" button and Current Bake's
      * "Reschedule" action. Takes no route argument — the
      * [com.BreadIQ.myapp.core.RawScheduledBakePlan] being scheduled is

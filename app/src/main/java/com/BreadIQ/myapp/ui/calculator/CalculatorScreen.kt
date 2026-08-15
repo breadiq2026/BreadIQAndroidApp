@@ -59,13 +59,13 @@ import com.BreadIQ.myapp.viewmodel.CalculatorViewModelFactory
  * `CalculatorResultsCard.kt` (next commits); this file owns navigation
  * chrome only, matching the source's own `body`/`header`/`footer` split.
  *
- * **Import is rendered as a visibly disabled affordance, not omitted** —
- * per direct instruction: `ImportModal`/`RecipeScanner` (CameraX + ML
- * Kit) are a deferred platform-integration item. Settings is likewise
- * disabled here — no `SettingsScreen` exists on this port yet (a
- * separate, unstarted sequence item), so the gear button would have
- * nowhere real to navigate; shown dimmed rather than wired to a no-op,
- * so it doesn't read as a working control that silently does nothing.
+ * **Import is now real** (camera scan/import Session B) — `ImportScreen`
+ * (`ImportModal`/`ImportModalFormatting`'s port) is a real Compose Navigation
+ * route, wired below. Settings is still disabled here — no `SettingsScreen`
+ * exists on this port yet (a separate, unstarted sequence item), so the
+ * gear button would have nowhere real to navigate; shown dimmed rather
+ * than wired to a no-op, so it doesn't read as a working control that
+ * silently does nothing.
  */
 @Composable
 fun CalculatorScreen(
@@ -73,6 +73,7 @@ fun CalculatorScreen(
     viewModel: CalculatorViewModel = viewModel(factory = CalculatorViewModelFactory(LocalContext.current)),
     onOpenNutrition: () -> Unit = {},
     onOpenAutolyse: () -> Unit = {},
+    onOpenImport: () -> Unit = {},
     onStartedBake: (String) -> Unit = {},
     onScheduleBake: (RawScheduledBakePlan) -> Unit = {},
 ) {
@@ -89,6 +90,7 @@ fun CalculatorScreen(
             cardIndex = state.cardIndex,
             onCardIndexChange = viewModel::goToCard,
             onResetClick = { viewModel.update { it.copy(showResetConfirm = true) } },
+            onImportClick = onOpenImport,
         )
 
         Column(
@@ -182,6 +184,7 @@ private fun CalculatorHeader(
     cardIndex: Int,
     onCardIndexChange: (Int) -> Unit,
     onResetClick: () -> Unit,
+    onImportClick: () -> Unit,
 ) {
     val colors = LocalBreadIQColors.current
     Column(
@@ -198,14 +201,13 @@ private fun CalculatorHeader(
             }
             Spacer(modifier = Modifier.weight(1f))
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-                // Deferred: needs RecipeScanner (CameraX + ML Kit) / ImportModal — see this file's own doc comment.
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(4.dp),
                     modifier = Modifier
-                        .alpha(0.5f)
                         .clip(RoundedCornerShape(8.dp))
                         .background(Color(0xFFEEF2FF))
+                        .clickable(onClick = onImportClick)
                         .padding(horizontal = 10.dp, vertical = 6.dp),
                 ) {
                     Icon(Icons.Filled.Description, contentDescription = null, tint = Color(0xFF1B3A8C), modifier = Modifier.size(12.dp))

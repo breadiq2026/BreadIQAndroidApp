@@ -368,6 +368,64 @@ Concrete order:
    - Camera scan/import -- `RecipeScanner.swift`, `ImportAnalyzer.swift`,
      `ImportModal.swift`, `ImportReviewScreen.swift` (~93KB combined, the
      biggest of these) -> CameraX + on-device text recognition (ML Kit).
+     Split across two sessions given the size.
+     - **Session A (core logic + camera/OCR capture) -- ✅ done 2026-08-14,
+       1 commit.** Everything with no UI screen, ported 1:1: `core/IngredientClassifier.kt`,
+       `core/IngredientLineParser.kt`, `core/IngredientDensityConverter.kt`
+       (the keyword-classification/OCR-text-parsing/volume-to-gram
+       pipeline `ImportModal.tsx` inlines from `lib/ingredient-densities`
+       -- two confirmed mobile/web drift points ported faithfully, two
+       confirmed genuine bugs fixed per direct instruction, all
+       documented inline same as the source), `core/CalculatorImportMapping.kt`
+       (the Safari-extension deep-link auto-apply heuristic -- fixed a
+       confirmed real `* 10` vs. `* 1000` arithmetic bug and an `.egg`
+       vs. `.egg + .eggYolk` summing inconsistency, both per direct
+       instruction), `core/ImportServices.kt` (the shared scan/URL-import/
+       staged-import seam types), and `core/ImportAnalyzer.kt` (the
+       `POST /api/import/analyze` route logic ported to run fully
+       offline -- confirmed `calcImportProofTime` is a genuinely separate
+       formula from `ProofTimeCalculator.calculate`, not reusable, per
+       that file's own doc comment).
+
+       **`core/RecipeScanner.kt` + `ui/components/RecipeScanCapture.kt`
+       -- a necessary two-file split the source doesn't have.** Every
+       other `core/` file in this codebase is Compose-free pure Kotlin;
+       camera/photo-picker capture is inherently Compose/Activity-bound
+       on Android in a way iOS's `PHPickerViewController`/
+       `UIImagePickerController` aren't (those present from any plain
+       class via the app's root view controller). `core/RecipeScanner.kt`
+       holds the real, UI-independent half -- resize-before-OCR (2000px
+       max width, matching the source's own pipeline-parity note) and ML
+       Kit Text Recognition (`com.google.mlkit:text-recognition:16.0.1`,
+       the bundled on-device variant -- confirmed offline, no network
+       call at inference). `ui/components/RecipeScanCapture.kt` holds the
+       real Compose-layer orchestration: the Photo Picker
+       (`ActivityResultContracts.PickVisualMedia`, stable since
+       `androidx.activity` 1.6.0 -- confirmed already well under this
+       project's existing 1.9.3 pin, no version bump needed) for the
+       library path, matching the source's own deliberate upgrade to
+       `PHPickerViewController` for its no-permission-prompt property
+       exactly (no `READ_MEDIA_IMAGES`/`READ_EXTERNAL_STORAGE` requested
+       or declared anywhere); real CameraX capture
+       (`camera-core`/`camera-camera2`/`camera-lifecycle`/`camera-view`
+       1.5.1, newly added) with a live `PreviewView` for the camera path,
+       requesting `CAMERA` lazily at the point of use -- the calendar
+       session's lazy-permission pattern, not the notifications
+       session's eager-at-launch one, since camera is only needed at an
+       explicit "Scan Recipe" tap.
+
+       **Not wired into any screen or nav destination this session** --
+       per direct instruction, this was Session A of two. `rememberRecipeScanner`/
+       `CameraCaptureScreen`/`RecipeScannerCameraOverlay` are real,
+       complete, and ready for Session B to call from `ImportModal`,
+       matching this codebase's existing "port it for real even without
+       a caller yet" precedent (`ui/components/BakeStepRow.kt`).
+     - **Session B (ImportModal/ImportReviewScreen + wiring into the
+       Calculator tab) -- not yet started.** `ImportModal.swift`'s
+       picker/menu UI and `ImportReviewScreen.swift`'s structured review
+       UI, plus threading a real result back into `CalculatorViewModel`
+       via [CalculatorImportMapping]-shaped data. "Scan Recipe" is not
+       reachable anywhere in the app until this session lands.
    - Push notifications -- `BakeNotificationScheduler.swift` -- ✅ done
      2026-08-14, 1 commit. Real bodies for `core/BakeNotificationScheduler.kt`'s
      four stub functions (`afterStart`, `cancel`, `syncAfterMutation`,

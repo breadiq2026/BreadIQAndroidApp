@@ -6,6 +6,17 @@
          before this. -->
     <uses-permission android:name="android.permission.INTERNET" />
 
+    <!-- Bake notifications (PORTING_PLAN.md step 7). POST_NOTIFICATIONS
+         is the API 33+ runtime permission gating any notification post
+         at all — requested once from MainActivity, see its own doc
+         comment. SCHEDULE_EXACT_ALARM (not USE_EXACT_ALARM — see
+         BakeNotificationScheduler's own doc comment on why) gates
+         AlarmManager.setExactAndAllowWhileIdle on API 31+; on API 33+ its
+         grant has no in-app dialog, only a Settings deep link, also
+         requested once from MainActivity. -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" />
+
     <application
         android:name=".BreadIQApplication"
         android:allowBackup="true"
@@ -27,6 +38,14 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+
+        <!-- Receives the AlarmManager alarms BakeNotificationScheduler
+             schedules and posts the actual notification at fire time —
+             see its own doc comment. Not exported: only this app's own
+             explicit-Intent PendingIntents ever target it. -->
+        <receiver
+            android:name=".core.BakeNotificationReceiver"
+            android:exported="false" />
     </application>
 
 </manifest>

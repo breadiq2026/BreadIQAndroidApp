@@ -1,6 +1,7 @@
 package com.BreadIQ.myapp
 
 import android.app.Application
+import com.BreadIQ.myapp.core.BakeNotificationScheduler
 import com.BreadIQ.myapp.data.local.DatabaseProvider
 
 /**
@@ -24,10 +25,19 @@ import com.BreadIQ.myapp.data.local.DatabaseProvider
  *
  * RevenueCat purchase configuration is still a later porting pass; see
  * PORTING_PLAN.md.
+ *
+ * [BakeNotificationScheduler.init]/[BakeNotificationScheduler.createNotificationChannel]
+ * are called eagerly here too (PORTING_PLAN.md step 7) — the Android
+ * counterpart of `BreadIQApp.swift` having no equivalent step at all
+ * (`UNUserNotificationCenter` needs no app-launch setup on iOS; a
+ * notification *channel*, required on Android's API 26+, is the one
+ * piece of setup Android needs that iOS doesn't).
  */
 class BreadIQApplication : Application() {
     override fun onCreate() {
         super.onCreate()
         DatabaseProvider.getInstance(this)
+        BakeNotificationScheduler.init(this)
+        BakeNotificationScheduler.createNotificationChannel(this)
     }
 }

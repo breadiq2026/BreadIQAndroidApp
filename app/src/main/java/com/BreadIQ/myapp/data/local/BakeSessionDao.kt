@@ -40,6 +40,23 @@ interface BakeSessionDao {
     @Query("DELETE FROM bake_sessions WHERE id = :id")
     suspend fun deleteById(id: String)
 
+    /**
+     * Narrow patch of just the three notification-id columns on a single
+     * step — [com.BreadIQ.myapp.core.BakeNotificationScheduler]'s
+     * counterpart of the iOS source mutating those fields directly on
+     * the already-in-memory SwiftData model and calling
+     * `modelContext.save()`. By the time this runs, the ViewModel call
+     * site has already persisted the rest of the step's row via
+     * [upsertSessionWithSteps] — this only needs to patch the ids
+     * scheduling just produced, not rewrite the whole row.
+     */
+    @Query("UPDATE bake_steps SET notificationId = :notificationId, prepNotifId = :prepNotifId, coilFoldNotifIds = :coilFoldNotifIds WHERE id = :stepId")
+    suspend fun updateStepNotificationIds(stepId: String, notificationId: String?, prepNotifId: String?, coilFoldNotifIds: List<String>?)
+
+    /** Same shape as [updateStepNotificationIds], for the session-level oven-preheat notification id. */
+    @Query("UPDATE bake_sessions SET ovenPreheatNotifId = :ovenPreheatNotifId WHERE id = :sessionId")
+    suspend fun updateOvenPreheatNotifId(sessionId: String, ovenPreheatNotifId: String?)
+
     /** Replaces a session and its full step set atomically — the save path both `getById`/`observeAll` callers expect to read back consistently. */
     @Transaction
     suspend fun upsertSessionWithSteps(session: BakeSessionEntity, steps: List<BakeStepEntity>) {

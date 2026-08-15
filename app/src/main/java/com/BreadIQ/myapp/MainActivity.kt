@@ -1,9 +1,17 @@
 package com.BreadIQ.myapp
 
+import android.Manifest
+import android.app.AlarmManager
+import android.content.Intent
+import android.content.pm.PackageManager
+import android.net.Uri
+import android.os.Build
 import android.os.Bundle
+import android.provider.Settings
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
@@ -22,6 +30,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.NavDestination.Companion.hierarchy
@@ -77,9 +86,23 @@ class MainActivity : ComponentActivity() {
         AuthViewModelFactory(applicationContext)
     }
 
+    /**
+     * Requested once, early — see `core/BakeNotificationScheduler.kt`'s
+     * own doc comment on why this can't be lazy the way the iOS source's
+     * `requestAuthorization()` is (Android's runtime permission dialog
+     * can only be shown through a live Activity's launcher; none of this
+     * app's ViewModels have one). No-op result callback: every real
+     * schedule call re-checks the permission itself right before
+     * scheduling, matching the source's own per-call guard — this
+     * launcher's only job is to show the system dialog once.
+     */
+    private val notificationPermissionLauncher =
+        registerForActivityResult(ActivityResultContracts.RequestPermission()) { }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
+        requestBakeNotificationPermissionsIfNeeded()
         setContent {
             BreadIQTheme {
                 val uiState by authViewModel.uiState.collectAsStateWithLifecycle()
@@ -88,6 +111,38 @@ class MainActivity : ComponentActivity() {
                     uiState.currentUser == null -> AuthScreen(authViewModel)
                     else -> BreadIQApp()
                 }
+            }
+        }
+    }
+
+    /**
+     * `POST_NOTIFICATIONS` (API 33+ runtime permission, real system
+     * dialog) and `SCHEDULE_EXACT_ALARM` (API 31+; no in-app dialog
+     * exists for it on API 33+, only a Settings deep link) — both gate
+     * real notification scheduling in `BakeNotificationScheduler`. Both
+     * checks short-circuit if already decided, same "ask once" shape as
+     * the source's own `requestAuthorization()`, just triggered from app
+     * launch instead of the first schedule call (see that file's own
+     * doc comment for why).
+     *
+     * **Known rough edge, left as-is deliberately**: if the user denies
+     * `SCHEDULE_EXACT_ALARM`, this redirects to Settings again on every
+     * subsequent launch until they grant it — a production app would
+     * likely gate this behind a dedicated in-app settings toggle instead
+     * of an unconditional launch-time prompt. Not built here; flagged
+     * rather than silently accepted.
+     */
+    private fun requestBakeNotificationPermissionsIfNeeded() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+            ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
+        ) {
+            notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+        }
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            val alarmManager = getSystemService(AlarmManager::class.java)
+            if (alarmManager?.canScheduleExactAlarms() == false) {
+                startActivity(Intent(Settings.ACTION_REQUEST_SCHEDULE_EXACT_ALARM, Uri.parse("package:$packageName")))
             }
         }
     }

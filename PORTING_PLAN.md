@@ -813,12 +813,12 @@ Concrete order:
    Browser" is reachable only from a `SettingsScreen` row, so building a
    temporary shim to reach the pairing-code work and redoing it later
    would have meant doing the same layout twice. `IngredientCostsScreen`
-   stays out of scope -- its own Settings row renders disabled/dimmed
-   (real UI, clearly present, not wired to a destination yet), the same
-   established pattern the Settings gear icon itself used before this
-   session. `SetNewPasswordScreen`/`DataStoreErrorScreen`/
-   `PendingImportsListScreen` are all still unstarted, not reachable from
-   Settings on iOS either.
+   stayed out of scope this particular session -- its own Settings row
+   rendered disabled/dimmed (real UI, clearly present, not wired to a
+   destination yet), the same established pattern the Settings gear icon
+   itself used before this session -- **now done for real, see below.**
+   `SetNewPasswordScreen`/`DataStoreErrorScreen`/`PendingImportsListScreen`
+   are all still unstarted, not reachable from Settings on iOS either.
 
    Pure logic ports (straight across): `core/PairingCodeServices.kt`
    (the `PairingCodeGenerating` seam, `Result<PairingCode>` rather than a
@@ -909,6 +909,110 @@ Concrete order:
    which now threads the shared `authViewModel` into `BreadIQApp()`
    alongside `subscriptionViewModel` (needed by `SettingsScreen`'s email
    row and sign-out/delete actions) for the first time.
+
+   **Ingredient Costs ("Ingredient Library") -- ✅ done 2026-08-17, 1
+   commit.** Unlike the RevenueCat and pairing-code sessions, **no
+   STUB-BACKEND boundary here** -- `GET /api/reference-prices` and
+   `GET/PUT/DELETE /api/ingredient-costs` are real, live endpoints today
+   (confirmed directly, matching the iOS source's own "verified live
+   against the deployed server" doc comment), wired end to end. Most of
+   the supporting plumbing already existed from earlier sessions
+   (`CostEstimator`, `IngredientReferencePriceCatalog`,
+   `IngredientPriceOverrideEntity`/`Dao`) and needed no changes --
+   confirmed directly before starting, per the handoff's own "Do NOT
+   touch" list.
+
+   **A real, pre-existing gap closed alongside the new screen, not just
+   inside it**: `CalculatorUiState.serverReferencePrices` was a real
+   field that nothing ever populated -- always `emptyMap()`, so
+   `CostAnalysisCard`'s `calcBatchCost` call always priced against the
+   bundled catalog only, never a live server price, independent of
+   whatever the (until-now-nonexistent) Ingredient Costs screen was
+   doing. `CalculatorViewModel` now owns its own one-shot
+   `GET /api/reference-prices` fetch (`core/IngredientCostSyncing.kt` +
+   `data/BackendIngredientCostSyncService.kt`, threaded into
+   `CalculatorViewModelFactory`) that actually populates it.
+   **Deliberately a second, fully independent fetch/instance from
+   `IngredientCostsViewModel`'s own** -- matches a genuine architectural
+   duplication in the iOS source itself (two screens, two independent
+   fetches of the same public endpoint, no shared cache), confirmed
+   directly and preserved rather than "simplified" into one shared
+   instance.
+
+   Pure logic port: `core/IngredientCostFormatting.kt` ($/lb <-> $/g
+   conversion, positive-price validation, 30-day staleness check --
+   compares raw elapsed seconds against the threshold, matching the
+   source's own `timeIntervalSince` check exactly rather than a
+   `Duration.toDays() > 30` truncation, which would wrongly call a
+   genuinely-stale 30.5-day gap "not stale"). The `453.592` g/lb
+   conversion factor stays a bare literal here too, matching both the
+   source and this codebase's own `IngredientDensityConverter.kt`, which
+   has the identical literal with no shared named constant either.
+
+   `core/IngredientCostSyncing.kt` bundles the seam (interface + error
+   type + `UnconfiguredIngredientCostSyncService`, this codebase's
+   established convention) -- `fetchReferencePrices()` now surfaces the
+   live price values themselves, not just their timestamp (a real fix
+   ported from the source: the original version decoded every row's
+   `pricePerGram` and then discarded everything except the max
+   `updatedAt`, so updating the live reference-price table had zero
+   effect on what any user saw or was charged, only nudging the
+   staleness banner's date). `data/BackendIngredientCostSyncService.kt`
+   -- `fetchReferencePrices` unauthenticated (public data),
+   `fetchOverrides`/`setOverride`/`deleteOverride` authenticated;
+   `android.net.Uri.encode` for the `PUT`/`DELETE` path segment (correct
+   path percent-encoding, not `URLEncoder`'s form-encoding, matching the
+   source's own `.urlPathAllowed` intent); `java.time.Instant.parse`
+   handles this backend's fractional-second timestamps natively, same as
+   `BackendPairingCodeGenerator.kt` already established.
+
+   `viewmodel/IngredientCostsViewModel.kt` -- a real, dedicated
+   `ViewModel` (this screen needs reactive DB access via
+   `IngredientPriceOverrideDao.observeAll()` plus async save/delete/sync
+   calls, unlike `ConnectBrowserScreen`'s plain-composable-state shape).
+   `save`/`reset` are real, immediate local `IngredientPriceOverrideDao`
+   mutations; the server sync call fires in its own, separate
+   `viewModelScope.launch` alongside the local write rather than after
+   it, matching the source's own detached `Task { _ = await
+   costSyncService.setOverride(...) }` -- local write wins immediately,
+   server sync trails behind, no error surfaced from the background
+   call. `syncOverridesFromServer()` runs once at `init`, upserting every
+   server-side override into the local Room table by key.
+
+   `ui/settings/IngredientCostsScreen.kt` -- header with a "⭐ Premium"
+   badge; a premium gate (lock icon/copy) when
+   `subscriptionViewModel.uiState.isPremium` is false; otherwise an info
+   banner (with a live "Last updated" clause), a stale-price warning
+   banner gated on `IngredientCostFormatting.isStale`, and one card per
+   category (`Flours`, `Fats & Oils`, `Salt`, `Yeast`, `Sweeteners`,
+   `Malt`, `Dairy & Eggs`, exact source order, including the later-added
+   `Dairy & Eggs` category so eggs/milk/butter -- which already affect
+   real cost via `CostEstimator`'s own table -- have somewhere to
+   render). Each row shows the effective display price (custom > live
+   server > bundled, the same precedence `CostEstimator.price(for:)`
+   already implements, now actually reflected on screen) with a "custom"
+   badge when overridden, an editable $/lb field (`BasicTextField`,
+   decimal keyboard, same shape `CalculatorAtoms.kt`'s existing numeric
+   fields already use), a save button, and a reset button when a custom
+   override exists. **Auto-save on blur ported as a real behavior, not
+   dropped as an implementation detail**: `Modifier.onFocusChanged`
+   calls the same `save(key)` the checkmark button calls when a dirty
+   field loses focus, matching the source's own `onChange(of:
+   focusedKey)`.
+
+   **One explicit, approved behavior change from the source, not a
+   preserve-as-is port**: the source's own "Upgrade to Premium" button on
+   the premium gate has no `onPress` at all -- a genuine dead button,
+   confirmed by reading the JSX, not assumed. Wired for real here to the
+   same Subscription-route entry point `SettingsScreen`'s tier/Upgrade
+   Plan rows already use. Everything else in this screen is a faithful
+   port.
+
+   Wiring: `SettingsScreen.kt`'s "Ingredient Costs" row is no longer
+   disabled -- navigates to the already-reserved
+   `BreadIQRoutes.INGREDIENT_COSTS`, wired into `MainActivity.kt`'s nav
+   graph, reading the same shared `subscriptionViewModel` instance for
+   its premium gate rather than a fresh one.
 
 
 ## Explicitly out of scope for Android v1 (per `PRODUCT_ROADMAP.md`)

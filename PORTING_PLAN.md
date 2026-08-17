@@ -1168,10 +1168,10 @@ Concrete order:
    `currentUser`, THEN signed-out, THEN signed-in) — routing to
    `SetNewPasswordScreen` instead of `AuthScreen`/`BreadIQApp`.
    `DeepLinkDestination.ImportToken` is captured into a new
-   `pendingImportToken` Activity field and left there, deliberately
-   unconsumed — `PendingImportsListScreen` (a separate, explicitly
-   out-of-scope follow-up) is the intended reader; this session only
-   makes sure a tapped import link isn't silently dropped.
+   `pendingImportToken` Activity field — **consumed for real now, see
+   the Import Review screen item below**; this session only made sure a
+   tapped import link wasn't silently dropped, the follow-up session
+   built the actual consumer.
 
    **No device/emulator smoke test happened this session** — this
    environment has no attached device and no emulator/AVD available
@@ -1181,6 +1181,87 @@ Concrete order:
    flagged here rather than silently skipped. Everything above is
    build-verified (`./gradlew assembleDebug` — `BUILD SUCCESSFUL`) but
    not yet exercised on a real device.
+
+   **Import Review screen (staged-import deep link -> calculator) -- ✅
+   done 2026-08-17, 1 commit.** The consumer for last session's
+   `pendingImportToken` capture -- fetch a staged import, review/confirm
+   it on a dedicated screen, apply it to the calculator, auto-save it as
+   a `Recipe`. `PendingImportsListScreen` (the Chrome-extension
+   cross-device inbox) stays a separate, explicitly out-of-scope
+   follow-up -- see below.
+
+   **Two good-news findings, confirmed directly before writing any code**:
+   `Recipe`/`RecipeEntity` already carried `importSourceURL`/
+   `importSourceName`/`formatNote` (ported ahead of schedule during the
+   original Room/model port, before this feature's UI existed) -- no Room
+   migration needed, no changes to `model/Recipe.kt`/`data/local/RecipeEntity.kt`/
+   `ui/recipes/RecipesScreen.kt` at all. `core/CalculatorImportMapping.kt`'s
+   `CalculatorImportApplier.map(...)` already existed and was already
+   correct (including the real `* 1000` vs. buggy `* 10` yeast/salt fix
+   documented there) -- not touched, not recomputed anywhere in the new
+   screen.
+
+   `data/BackendImportStagingFetcher.kt` -- real `ImportStagingFetching`,
+   `GET /api/import/staged/:token`, authenticated (matching the source's
+   own `authFetch` call even though the route handler itself doesn't
+   check identity). `category` decodes as a raw string first, degrading
+   an unrecognized value to `IngredientCategory.UNKNOWN` rather than
+   failing the whole decode. `core/ImportReviewFormatting.kt` -- two pure
+   helpers (`sourceDomain`, `initialStyle`), same "split out for
+   testability" pattern as `CalculatorFormatting`/`ImportModalFormatting`.
+
+   `ui/calculator/ImportReviewScreen.kt` (~470 lines) -- all of this
+   screen's state is its own local state, seeded once from the fetched
+   `payload`/`mapping`; nothing writes into `CalculatorViewModel`'s real
+   state until Continue, so an abandoned review ("Start from Scratch")
+   leaves zero trace. Reuses this app's existing shared calculator row
+   controls (`CalcSectionLabel`/`CalcToggleRow`/`CalcStepperRow`/
+   `CalcChipRow`/`CalcSelectMenu`/`CalcInfoBox`, already public in this
+   package from the original Calculator-screen port) rather than
+   duplicating ~200 lines of working control code -- these didn't need
+   the source's own private-to-internal widening step since this port's
+   equivalents were never file-private to begin with. Style/shape/batch/
+   humidity/pre-ferment/cold-ferment controls, plus a collapsed-by-default
+   Advanced Options section (flour-blend editor, yeast-type picker, an
+   ingredient-overrides list that deliberately does NOT recompute
+   `CalculatorImportMapping`'s output when edited -- a real scope
+   boundary matching the source exactly, not an oversight).
+
+   `CalculatorViewModel.kt` wiring: `fetchStagedImport(token)` (fetch +
+   map, populates `importReview` for the screen to render, never real
+   formula state), `applyImportReviewOutcome(outcome, payload)` (the
+   only place a confirmed import reaches real state -- calls `selectStyle`
+   first for correct style-derived defaults, then overwrites with the
+   outcome's real values; milk/dairy wiring only applies for
+   brioche/soft_roll, matching the source's own style-gating exactly),
+   and the mandatory auto-save hook inside `calculate()` itself (not the
+   apply function, not the review screen -- fermentation/environment
+   inputs that affect the saved recipe aren't set until Cards 3/4).
+   `autoSaveImportedRecipe()` reuses `buildRecipe` (now takes optional
+   `importSourceURL`/`importSourceName`/`formatNote` params, existing
+   callers unaffected) and **respects the existing Basic/Premium
+   paywall** -- the one deliberate departure from "always save," matching
+   `handleSaveRecipe()`'s own gate exactly; a free-tier import still
+   calculates and applies normally, it just doesn't persist. Local-only
+   save, matching `handleSaveRecipe()`'s own current scope boundary --
+   no backend sync call added here either.
+
+   `CalculatorScreen.kt` -- an early return renders `ImportReviewScreen`
+   as a full replacement while `importReview` is non-null (the direct
+   analog of the source's `.fullScreenCover`, which fully obscures the
+   screen underneath rather than sitting as a sheet on top of it). A new
+   `ImportStatusBanner` (fetching/error states only, not the "N recipes
+   waiting" variant) sits at the top of the scrollable card content,
+   matching the source's own placement. `MainActivity.kt`'s
+   `pendingImportToken` is now threaded down to the Calculator route the
+   same established way `pendingRecipeId`/`pendingSchedulePlan` already
+   are (`BreadIQApp` gained two params), consumed by a
+   `LaunchedEffect(pendingImportToken)` right alongside `pendingRecipeId`'s
+   own.
+
+   **No device/emulator smoke test happened this session either** -- same
+   environment limitation as the deep-link session immediately before it
+   (no attached device, no emulator/AVD). Build-verified only.
 
 
 ## Explicitly out of scope for Android v1 (per `PRODUCT_ROADMAP.md`)

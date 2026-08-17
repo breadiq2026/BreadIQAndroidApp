@@ -1014,6 +1014,63 @@ Concrete order:
    graph, reading the same shared `subscriptionViewModel` instance for
    its premium gate rather than a fresh one.
 
+   **`DataStoreErrorScreen` -- ✅ done 2026-08-17, 1 commit.** A real,
+   already-flagged gap closed, not a straight port -- `data/local/BreadIQDatabase.kt`'s
+   own doc comment had already called this out as "a deliberate scope
+   decision, not an oversight": SwiftData's `ModelContainer(for:
+   configurations:)` validates and opens the store *eagerly*, at
+   construction time, so a corrupted store or failed migration surfaces
+   immediately as a thrown error iOS can catch right at app launch and
+   branch its root view on. Room's `.build()` is *lazy* -- it hands back
+   a working `BreadIQDatabase` reference regardless of the on-disk
+   file's condition, and any real corruption/migration failure only
+   throws later, from whatever call site happens to trigger the first
+   real query. There was no single "did construction succeed" point to
+   gate a root view on the way `BreadIQApp.swift` does.
+
+   **The fix**: `DatabaseProvider.openEagerly(context)` forces that lazy
+   open to happen eagerly, once, on `Dispatchers.IO`, by touching
+   `db.openHelper.writableDatabase` (a bare `getInstance()` call does
+   NOT trigger the real SQLite file I/O -- this does) -- the direct
+   analog of `makeModelContainer()`'s own try/catch around
+   `ModelContainer(for:configurations:)`, wrapped in a `Result`.
+   `DatabaseProvider.eraseLocalStore(context)` is "Erase & Start Fresh"'s
+   real recovery action -- clears the cached singleton (necessary, not
+   optional: without it, the next `getInstance()` would just hand back
+   the same, still-broken, cached reference) then calls
+   `Context.deleteDatabase(name)`, a real simplification over the iOS
+   source's `eraseLocalStoreAndRetry()`, which has to manually
+   reconstruct the store's file path and delete its `-wal`/`-shm`
+   sidecars in a loop -- Android's own platform API already does exactly
+   that correctly, no reason to reimplement the loop.
+
+   `screens/DataStoreErrorScreen.kt` -- same package as `AuthScreen.kt`
+   (a root-level, pre-app screen, not a Settings-reached one): warning
+   emoji, explanatory copy, the raw error's message in a monospaced font
+   when present, "Try Again" (`BreadIQButtonVariant.PRIMARY`) and "Erase
+   & Start Fresh" (`BreadIQButtonVariant.DESTRUCTIVE`). **The
+   double-confirm structure for "Erase & Start Fresh" is ported exactly,
+   same established two-`AlertDialog` pattern from the Settings
+   session's account-deletion flow** -- nothing erases until the second
+   dialog's own confirm button.
+
+   **A real `MainActivity.kt` restructuring, not a drop-in addition**:
+   added an outer `DbOpenState` gate (`Checking`/`Ready`/`Failed`) that
+   wraps the ENTIRE pre-existing auth-gated block (loading/signed-out/
+   signed-in), matching `BreadIQApp.swift`'s own `if let modelContainer
+   { RootView() /* includes its own auth branching */ } else {
+   DataStoreErrorScreen() }` structure exactly -- the auth `when` block
+   only renders once `DbOpenState.Ready`. A `LaunchedEffect(dbRetryKey)`
+   calls `openEagerly` once at launch and again whenever "Try Again"/
+   "Erase & Start Fresh" increments `dbRetryKey`. **Why the ordering is
+   the actual point of this session, not the new screen's visual
+   layout**: `CalculatorViewModelFactory`/`IngredientCostsViewModelFactory`/
+   every other DB-touching factory in this app calls
+   `DatabaseProvider.getInstance(...)` and assumes it just works -- none
+   are equipped to handle a broken database. With this gate wrapping
+   everything before `AuthScreen`/`BreadIQApp` ever render, none of
+   those factories can ever be reached with a broken DB underneath them.
+
 
 ## Explicitly out of scope for Android v1 (per `PRODUCT_ROADMAP.md`)
 

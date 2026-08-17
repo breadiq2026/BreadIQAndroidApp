@@ -1071,6 +1071,117 @@ Concrete order:
    everything before `AuthScreen`/`BreadIQApp` ever render, none of
    those factories can ever be reached with a broken DB underneath them.
 
+   **Deep-link/App Links infrastructure + `SetNewPasswordScreen` -- ✅
+   done 2026-08-17, 1 commit.** Closes the backlog item that was blocking
+   `SetNewPasswordScreen` and `PendingImportsListScreen`; this session
+   builds the real infrastructure AND wires up its first consumer
+   (`SetNewPasswordScreen`) — `PendingImportsListScreen` stays a
+   separate, explicitly out-of-scope follow-up (see below).
+
+   `AndroidManifest.xml`'s `MainActivity` now declares
+   `android:launchMode="singleTask"` (real, necessary: without it, a
+   deep link tapped while already running would stack a second
+   `MainActivity` instead of delivering to the live one) plus two
+   `<intent-filter>`s: a custom-scheme one for `breadiq-mobile://...`
+   (no host restriction at the manifest level — `core/DeepLinkRouting.kt`
+   is the single source of truth for what host/path means, matching
+   `AppRouter`'s own code-level routing on iOS) and an
+   `autoVerify="true"` App Links one scoped to
+   `https://breadiq.io/reset-password` /
+   `https://www.breadiq.io/reset-password`, mirroring the two Universal
+   Link domains in `BreadIQ.entitlements` and iOS's own choice to only
+   wire `reset-password` for the web-link path.
+
+   **App Links has a real dependency outside this repo, flagged rather
+   than silently declared "done"**: `autoVerify="true"` alone does not
+   make `https://breadiq.io/reset-password` links open this app — Google
+   must successfully fetch and validate
+   `https://breadiq.io/.well-known/assetlinks.json`, listing this app's
+   `applicationId` (`com.BreadIQ.myapp`) and its signing certificate's
+   SHA-256 fingerprint. That file is hosted on `breadiq.io`'s web server,
+   outside this repo and likely outside any single session's reach.
+   **Until it exists and verifies, a tapped `https://breadiq.io/reset-password`
+   link opens in Chrome, not this app — safe, inert, dead-until-configured,
+   not a regression.** The custom-scheme path
+   (`breadiq-mobile://reset-password#...`) works immediately, independent
+   of that file — same relationship as iOS's own Universal Link needing
+   its parallel `apple-app-site-association` file while its custom scheme
+   shipped immediately.
+
+   `core/DeepLinkRouting.kt` — direct port of
+   `AppRouter.urlDeepLinkDestination(for:)` /
+   `passwordRecoveryDestination(fromFragment:)` / `fragmentParameters(_:)`,
+   operating on `android.net.Uri`. **A real, non-obvious wrinkle, ported
+   carefully, not glossed over**: GoTrue's `/verify?type=recovery`
+   redirect encodes the session as URL FRAGMENT parameters
+   (`#access_token=...`), not query parameters — live-confirmed on the
+   iOS port before either port was written. `Uri.getFragment()` would
+   have been the wrong call regardless — it returns the ALREADY
+   percent-decoded fragment, where iOS's own `fragmentParameters(_:)`
+   splits the RAW fragment on `&`/`=` first, THEN decodes each value
+   individually, a meaningfully different order for a token value that
+   could itself contain an encoded `&`/`=`. `Uri.getEncodedFragment()` +
+   per-value `Uri.decode(...)` matches that order exactly.
+
+   `AuthServicing.kt`/`SupabaseAuthService.kt`/`AuthViewModel.kt` —
+   `completePasswordRecovery` is real now (previously deliberately
+   omitted, exactly as that interface's own doc comment predicted, until
+   a deep-link consumer existed to reach it). Implemented against the
+   official `supabase-kt` SDK (`Auth.importSession`/`Auth.updateUser`),
+   not a hand-rolled REST call the way iOS's own version is — this port
+   already committed to the official SDK for everything else in this
+   file. `UserSession` needs a real `expiresIn` (seconds-until-expiry)
+   the iOS port's hand-built `GoTrueSession` doesn't need at all —
+   decoded here from the access token JWT's own `exp` claim rather than
+   guessing a fixed TTL, verified directly against the pinned
+   `supabase-kt` 3.2.2 sources (constructor defaults, real parameter
+   names) in this project's own Gradle cache before writing any of this,
+   not assumed. `requestPasswordReset` now passes
+   `redirectUrl = "breadiq-mobile://reset-password"`, the exact string
+   iOS's own `requestPasswordReset` uses and the exact host
+   `DeepLinkRouting.kt` routes on — **the Supabase Redirect URLs
+   allowlist entry for this string is assumed already present (iOS's own
+   doc comment records adding it when that port built this same flow,
+   and both apps share one Supabase project), not independently
+   re-verified from this session, which had no direct dashboard access**.
+
+   `screens/SetNewPasswordScreen.kt` — new product surface, no source
+   Expo screen to port (confirmed on the iOS port that neither
+   `breadiq-mobile` nor `bread-lab` ever had a working "set new password"
+   destination). Same fixed, non-theme-aware brand palette as
+   `AuthScreen.kt`, duplicated locally rather than shared — matching the
+   iOS source's own precedent of independently re-declaring identical
+   color constants rather than importing across screen files. Reuses
+   `AuthScreen.kt`'s own password-field/show-hide-eye-icon/
+   submit-button-loading-state patterns exactly, not reinvented.
+
+   **A real `MainActivity.kt` restructuring, not a drop-in addition**:
+   `onCreate`'s `intent?.data` plus a new `onNewIntent` override (reached
+   only because of `singleTask` above) both write into one
+   `pendingDeepLinkUri` Activity field — the direct analog of the
+   source's two delivery paths (`Linking.getInitialURL()` /
+   `Linking.addEventListener("url", ...)`) funneling into one
+   `handleURLDeepLink`. Inside the existing `DbOpenState.Ready` branch,
+   a `DeepLinkDestination.PasswordRecovery` check now sits ahead of the
+   signed-out/signed-in split — matching `RootView.swift`'s real branch
+   order exactly (isLoading, THEN pendingPasswordRecovery regardless of
+   `currentUser`, THEN signed-out, THEN signed-in) — routing to
+   `SetNewPasswordScreen` instead of `AuthScreen`/`BreadIQApp`.
+   `DeepLinkDestination.ImportToken` is captured into a new
+   `pendingImportToken` Activity field and left there, deliberately
+   unconsumed — `PendingImportsListScreen` (a separate, explicitly
+   out-of-scope follow-up) is the intended reader; this session only
+   makes sure a tapped import link isn't silently dropped.
+
+   **No device/emulator smoke test happened this session** — this
+   environment has no attached device and no emulator/AVD available
+   (`adb devices` found nothing, no `emulator` binary present). The
+   `adb shell am start -W -a android.intent.action.VIEW -d "breadiq-mobile://..."`
+   verification the handoff asked for, if possible, could not be run;
+   flagged here rather than silently skipped. Everything above is
+   build-verified (`./gradlew assembleDebug` — `BUILD SUCCESSFUL`) but
+   not yet exercised on a real device.
+
 
 ## Explicitly out of scope for Android v1 (per `PRODUCT_ROADMAP.md`)
 

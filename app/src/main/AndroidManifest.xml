@@ -51,11 +51,50 @@
         <activity
             android:name=".MainActivity"
             android:exported="true"
+            android:launchMode="singleTask"
             android:screenOrientation="portrait"
             android:theme="@style/Theme.BreadIQ">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+
+            <!-- Custom-scheme deep links — the Android counterpart of
+                 Info.plist's CFBundleURLSchemes: ["breadiq-mobile"].
+                 breadiq-mobile://import?token=... and
+                 breadiq-mobile://reset-password#access_token=...&type=recovery
+                 both arrive here; core/DeepLinkRouting.kt is the single
+                 source of truth for what host/path means, not separate
+                 manifest entries per destination, matching AppRouter's
+                 own code-level routing on iOS. -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="breadiq-mobile" />
+            </intent-filter>
+
+            <!-- App Links (Android's Universal Links) — the counterpart of
+                 BreadIQ.entitlements' com.apple.developer.associated-domains
+                 (applinks:breadiq.io, applinks:www.breadiq.io). Only
+                 reset-password is wired, matching iOS's own choice (the
+                 import flow has no web-link counterpart either).
+                 autoVerify="true" alone does NOT make https://breadiq.io/
+                 reset-password links open this app — see MainActivity.kt's
+                 own doc comment on the still-outside-this-repo
+                 assetlinks.json dependency. -->
+            <intent-filter android:autoVerify="true">
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data
+                    android:scheme="https"
+                    android:host="breadiq.io"
+                    android:pathPrefix="/reset-password" />
+                <data
+                    android:scheme="https"
+                    android:host="www.breadiq.io"
+                    android:pathPrefix="/reset-password" />
             </intent-filter>
         </activity>
 

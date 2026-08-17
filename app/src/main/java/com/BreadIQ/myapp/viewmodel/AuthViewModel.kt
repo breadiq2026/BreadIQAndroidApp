@@ -44,9 +44,10 @@ data class AuthUiState(
  * equivalent — a display name isn't secret, matching iOS's own reasoning
  * for why this doesn't belong in Keychain/Keystore.
  *
- * Deliberately missing `completePasswordRecovery` — see
- * [AuthServicing]'s own doc comment for why that's out of scope this
- * session.
+ * `completePasswordRecovery` is real now, mirroring iOS's
+ * `AuthStore.completePasswordRecovery` exactly — see [AuthServicing]'s
+ * own doc comment for the deep-link infrastructure that makes it
+ * reachable.
  */
 class AuthViewModel(
     private val service: AuthServicing = UnconfiguredAuthService(),
@@ -96,6 +97,25 @@ class AuthViewModel(
 
     /** `handleForgotPassword`'s `resetPasswordForEmail` call — propagates the real result, see [AuthServicing.requestPasswordReset]'s own doc comment. */
     suspend fun requestPasswordReset(email: String): Result<Unit> = service.requestPasswordReset(email)
+
+    /**
+     * `SetNewPasswordScreen`'s submit action — adopts the recovery
+     * session and sets a new password on it. On success, assigns the
+     * returned user through the same [applyDisplayNameFallback] every
+     * other auth-success path already uses, then fires the same
+     * idempotent `lifecycleSync.startTrial` call [signIn]/[loadInitialSession]
+     * already fire — a freshly-adopted recovery session is a real
+     * signed-in session, same as those.
+     */
+    suspend fun completePasswordRecovery(accessToken: String, refreshToken: String, newPassword: String): Result<Unit> =
+        service.completePasswordRecovery(accessToken, refreshToken, newPassword).fold(
+            onSuccess = { user ->
+                _uiState.value = _uiState.value.copy(currentUser = applyDisplayNameFallback(user))
+                service.currentAccessToken()?.let { lifecycleSync.startTrial(it) }
+                Result.success(Unit)
+            },
+            onFailure = { Result.failure(it) },
+        )
 
     /** `DELETE /api/me`, then the same sign-out the source performs on success. Inert until a real [AccountServicing] is wired up — see that interface's own doc comment. */
     suspend fun deleteAccount(): Result<Unit> {

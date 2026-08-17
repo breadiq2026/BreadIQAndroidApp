@@ -7,13 +7,17 @@ import io.github.jan.supabase.auth.exception.AuthRestException
 import io.github.jan.supabase.auth.providers.builtin.Email
 import io.github.jan.supabase.auth.status.SessionStatus
 import io.github.jan.supabase.auth.user.UserInfo
+import io.github.jan.supabase.auth.user.UserSession
 import io.github.jan.supabase.exceptions.HttpRequestException
 import io.github.jan.supabase.exceptions.RestException
 import io.ktor.client.plugins.HttpRequestTimeoutException
+import kotlinx.serialization.Serializable
+import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
+import java.util.Base64
 
 /**
  * Ported from the iOS app's `Core/SupabaseAuthService.swift` +
@@ -102,27 +106,104 @@ class SupabaseAuthService(private val client: SupabaseClient) : AuthServicing {
     }
 
     /**
-     * `auth.resetPasswordForEmail(email)`, matching iOS's
-     * `AuthServicing.requestPasswordReset`. Unlike the source Expo app's
-     * `handleForgotPassword` (which never checked this call's result at
-     * all, always showing "email sent" regardless of success — a gap the
-     * iOS port fixed per direct instruction there), this surfaces the
-     * real outcome, same as the iOS port's own fix.
+     * `auth.resetPasswordForEmail(email, redirectUrl: ...)`, matching
+     * iOS's `AuthServicing.requestPasswordReset`. Unlike the source Expo
+     * app's `handleForgotPassword` (which never checked this call's
+     * result at all, always showing "email sent" regardless of success —
+     * a gap the iOS port fixed per direct instruction there), this
+     * surfaces the real outcome, same as the iOS port's own fix.
      *
-     * No explicit `redirectUrl`: Android has no deep-link consumer for the
-     * recovery link yet (see [AuthServicing]'s own doc comment on why
-     * `completePasswordRecovery` is out of scope this session). Supabase
-     * falls back to the project's dashboard-configured default site URL
-     * when none is given — the same graceful fallback GoTrue applies on
-     * iOS whenever a `redirect_to` isn't on the project's allowlist.
+     * `redirectUrl = "breadiq-mobile://reset-password"` — the exact
+     * string iOS's own `requestPasswordReset` uses as `redirect_to`, and
+     * the exact host [com.BreadIQ.myapp.core.DeepLinkRouting] routes on
+     * now that a real deep-link consumer exists
+     * ([com.BreadIQ.myapp.screens.SetNewPasswordScreen]). GoTrue only
+     * honors a `redirect_to`/`redirectUrl` that's on the project's
+     * Redirect URLs allowlist (Dashboard → Authentication → URL
+     * Configuration) — otherwise it silently substitutes the project
+     * default. **Assumed already present, not independently
+     * re-verified from this session**: iOS's own doc comment records
+     * that this exact string was confirmed live/added to the allowlist
+     * when that port built this same flow, and both apps share one
+     * Supabase project — flagged here rather than silently assumed
+     * bulletproof, since this session had no direct dashboard access to
+     * re-check it.
      */
     override suspend fun requestPasswordReset(email: String): Result<Unit> = runCatching {
-        client.auth.resetPasswordForEmail(email = email)
+        client.auth.resetPasswordForEmail(email = email, redirectUrl = "breadiq-mobile://reset-password")
+    }.mapAuthFailure()
+
+    /**
+     * Adopts a password-recovery session client-side, then sets the new
+     * password on it — the real backend for `SetNewPasswordScreen`.
+     *
+     * **A real, non-obvious wrinkle iOS doesn't have to deal with**: iOS's
+     * own `completePasswordRecovery` builds its `GoTrueSession` by hand
+     * (`GoTrueSession(access_token:refresh_token:user:)`, no `expiresIn`
+     * field at all — it just stores the raw tokens). `supabase-kt`'s
+     * [UserSession] requires a real `expiresIn` (seconds-until-expiry) to
+     * construct — decoded here from the access token JWT's own `exp`
+     * claim rather than guessing a fixed TTL that might not match this
+     * project's real GoTrue config (see [accessTokenExpiresInSeconds]).
+     * `user = null` — the SDK's own default; `updateUser` below fills in
+     * the real user info via its own response, matching the ordering
+     * iOS's version uses (`PUT /auth/v1/user` returns the updated user
+     * directly, then that response is what gets stored).
+     *
+     * Live-verified end to end is NOT claimed here the way iOS's own doc
+     * comment claims for its hand-rolled REST version — this session had
+     * no way to trigger a real GoTrue recovery email + click the link
+     * during development; see this repo's own completion notes for the
+     * manual-smoke-test status.
+     */
+    @OptIn(kotlin.time.ExperimentalTime::class)
+    override suspend fun completePasswordRecovery(accessToken: String, refreshToken: String, newPassword: String): Result<CurrentUser> = runCatching {
+        client.auth.importSession(
+            UserSession(
+                accessToken = accessToken,
+                refreshToken = refreshToken,
+                expiresIn = accessTokenExpiresInSeconds(accessToken),
+                tokenType = "bearer",
+                user = null,
+            ),
+        )
+        client.auth.updateUser { password = newPassword }
+        client.auth.currentUserOrNull()?.asCurrentUser()
+            ?: throw AuthServiceError("Password updated, but no session was returned.")
     }.mapAuthFailure()
 
     override suspend fun currentAccessToken(): String? {
         client.auth.awaitInitialization()
         return client.auth.currentAccessTokenOrNull()
+    }
+}
+
+@Serializable
+private data class JwtPayloadExp(val exp: Long? = null)
+
+/**
+ * Decodes the access token JWT's own `exp` claim (standard
+ * `header.payload.signature` base64url structure, no signature
+ * verification needed here — this token was just handed to us by our own
+ * deep-link handler, not received from an untrusted third party) and
+ * returns seconds-until-expiry, clamped to at least 1. Falls back to a
+ * conservative 1-hour estimate (GoTrue's real default access-token TTL)
+ * if the token can't be parsed for any reason, rather than failing the
+ * whole recovery flow over a decode issue.
+ */
+private val jwtJson = Json { ignoreUnknownKeys = true }
+
+private fun accessTokenExpiresInSeconds(accessToken: String, fallbackSeconds: Long = 3600L): Long {
+    return try {
+        val payloadSegment = accessToken.split(".").getOrNull(1) ?: return fallbackSeconds
+        val padded = payloadSegment + "=".repeat((4 - payloadSegment.length % 4) % 4)
+        val decoded = String(Base64.getUrlDecoder().decode(padded))
+        val exp = jwtJson.decodeFromString(JwtPayloadExp.serializer(), decoded).exp
+            ?: return fallbackSeconds
+        val nowSeconds = System.currentTimeMillis() / 1000
+        (exp - nowSeconds).coerceAtLeast(1L)
+    } catch (e: Exception) {
+        fallbackSeconds
     }
 }
 

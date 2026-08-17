@@ -42,13 +42,16 @@ import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
+import com.BreadIQ.myapp.core.DeepLinkDestination
 import com.BreadIQ.myapp.core.RawScheduledBakePlan
+import com.BreadIQ.myapp.core.deepLinkDestination
 import com.BreadIQ.myapp.data.TemperatureUnitStore
 import com.BreadIQ.myapp.data.local.DatabaseProvider
 import com.BreadIQ.myapp.navigation.BreadIQDestination
 import com.BreadIQ.myapp.navigation.BreadIQRoutes
 import com.BreadIQ.myapp.screens.AuthScreen
 import com.BreadIQ.myapp.screens.DataStoreErrorScreen
+import com.BreadIQ.myapp.screens.SetNewPasswordScreen
 import com.BreadIQ.myapp.ui.bakedetail.BakeDetailScreen
 import com.BreadIQ.myapp.ui.calculator.AutolyseGuidanceScreen
 import com.BreadIQ.myapp.ui.calculator.CalculatorScreen
@@ -83,13 +86,27 @@ import com.BreadIQ.myapp.viewmodel.selectedShape
  * `RootView.swift`'s three-state split — loading / signed-out /
  * signed-in — via `AuthViewModel.uiState`: a loading spinner while the
  * initial session check is in flight, [AuthScreen] when there's no
- * session, the tab shell when there is. Deliberately narrower than
- * `RootView.swift`, which this same three-way split sits inside of on
- * iOS: no password-recovery deep-link branch (no deep-link infra exists
- * on Android yet — see `AuthServicing`'s own doc comment), no bake-session
- * reconciliation (that depends on a ported feature — `BakeSessionEngine`
- * — that doesn't exist here yet). Just the auth split, which is what
- * this step's source-file list actually asked for.
+ * session, the tab shell when there is. **Now also matches `RootView.swift`'s
+ * password-recovery branch, checked ahead of the signed-out/signed-in
+ * split** — a pending `DeepLinkDestination.PasswordRecovery` means "set
+ * a new password" regardless of `currentUser`, since a recovery session
+ * is limited/task-specific, not a normal sign-in (see [DeepLinkDestination]'s
+ * own doc comment for the deep-link infrastructure that produces it).
+ * Deliberately still narrower than `RootView.swift` in one respect: no
+ * bake-session reconciliation (that depends on a ported feature —
+ * `BakeSessionEngine` — that doesn't exist here yet).
+ *
+ * **Deep-link delivery, `singleTask` + `onNewIntent`**: `AndroidManifest.xml`'s
+ * `MainActivity` `<activity>` now declares `android:launchMode="singleTask"`,
+ * so a deep link tapped while this Activity is already running/backgrounded
+ * reuses the live instance and calls [onNewIntent] instead of spawning a
+ * second `MainActivity` on top of it (which would never reach the
+ * composition below at all). [pendingDeepLinkUri] captures both delivery
+ * paths — [onCreate]'s own `intent?.data` for a cold launch via link, and
+ * [onNewIntent] for an already-running one — the direct analog of the
+ * source's two delivery paths (`Linking.getInitialURL()` /
+ * `Linking.addEventListener("url", ...)`) funneling into the same
+ * `handleURLDeepLink`.
  *
  * **A second, OUTER gate now wraps all of the above — [DbOpenState]** —
  * the direct analog of `BreadIQApp.swift`'s own `if let modelContainer
@@ -143,10 +160,29 @@ class MainActivity : ComponentActivity() {
     private val notificationPermissionLauncher =
         registerForActivityResult(ActivityResultContracts.RequestPermission()) { }
 
+    /**
+     * The most recently received deep-link `Uri`, from either delivery
+     * path (see this class's own doc comment). An Activity field (`by
+     * mutableStateOf`), not `remember`ed inside the composable, since
+     * [onNewIntent] runs outside composition and needs somewhere to
+     * actually write the new value.
+     */
+    private var pendingDeepLinkUri by mutableStateOf<Uri?>(null)
+
+    /**
+     * The token from a captured `DeepLinkDestination.ImportToken` — set,
+     * never yet read. `PendingImportsListScreen` (a separate, explicitly
+     * out-of-scope follow-up session) is the intended consumer; this
+     * session only makes sure a tapped import link isn't silently
+     * dropped on the floor.
+     */
+    private var pendingImportToken by mutableStateOf<String?>(null)
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         requestBakeNotificationPermissionsIfNeeded()
+        pendingDeepLinkUri = intent?.data
         setContent {
             BreadIQTheme {
                 val appContext = applicationContext
@@ -193,8 +229,34 @@ class MainActivity : ComponentActivity() {
                             }
                         }
 
+                        // Deep-link routing (see this class's own doc
+                        // comment) — the direct analog of AppRouter's
+                        // handleURLDeepLink applying urlDeepLinkDestination's
+                        // decision.
+                        val destination = remember(pendingDeepLinkUri) {
+                            pendingDeepLinkUri?.let { deepLinkDestination(it) } ?: DeepLinkDestination.None
+                        }
+                        LaunchedEffect(destination) {
+                            // ImportToken clears pendingDeepLinkUri but keeps
+                            // pendingImportToken set — see that field's own
+                            // doc comment on why nothing consumes it yet.
+                            if (destination is DeepLinkDestination.ImportToken) {
+                                pendingImportToken = destination.token
+                                pendingDeepLinkUri = null
+                            }
+                        }
+
+                        // Matches RootView.swift's real branch order exactly:
+                        // isLoading, THEN pendingPasswordRecovery (regardless
+                        // of currentUser), THEN signed-out, THEN signed-in.
                         when {
                             uiState.isLoading -> LoadingScreen()
+                            destination is DeepLinkDestination.PasswordRecovery -> SetNewPasswordScreen(
+                                accessToken = destination.accessToken,
+                                refreshToken = destination.refreshToken,
+                                authViewModel = authViewModel,
+                                onComplete = { pendingDeepLinkUri = null },
+                            )
                             uiState.currentUser == null -> AuthScreen(authViewModel)
                             else -> BreadIQApp(authViewModel, subscriptionViewModel, temperatureUnitStore)
                         }
@@ -234,6 +296,20 @@ class MainActivity : ComponentActivity() {
                 startActivity(Intent(Settings.ACTION_REQUEST_SCHEDULE_EXACT_ALARM, Uri.parse("package:$packageName")))
             }
         }
+    }
+
+    /**
+     * Reached only because `AndroidManifest.xml` declares
+     * `android:launchMode="singleTask"` on this Activity — without it,
+     * a deep link tapped while already running would spawn a second
+     * `MainActivity` instance instead of delivering here. `setIntent(intent)`
+     * keeps `getIntent()` consistent with what actually arrived, matching
+     * the standard `onNewIntent` contract.
+     */
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        pendingDeepLinkUri = intent.data
     }
 }
 

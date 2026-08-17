@@ -21,16 +21,12 @@ class AuthServiceError(message: String) : Exception(message)
  * interface — only the concrete implementation differs by build
  * configuration, same pattern the iOS port uses.
  *
- * Deliberately narrower than iOS's `AuthServicing`: this omits
- * `completePasswordRecovery`. That method exists on iOS to complete a
- * password-reset deep link (`RootView`'s `pendingPasswordRecovery` +
- * `SetNewPasswordScreen`, routed through `AppRouter`) — none of which is
- * in scope for this session (not in the source-file list this step was
- * given, and Android has no deep-link/App-Links handling set up yet to
- * ever call it). Rather than ship an unverified guess at how
- * `Auth.importSession` behaves for a recovery token pair with no way to
- * test it live, it's left out entirely and noted in PORTING_PLAN.md as
- * deferred, to be added once Android's deep-link consumer exists.
+ * **`completePasswordRecovery` is real now** — the deep-link/App Links
+ * infrastructure session wired up the one thing this method needed to be
+ * reachable at all: a deep-link consumer that can actually hand it an
+ * `accessToken`/`refreshToken` pair
+ * ([com.BreadIQ.myapp.core.DeepLinkRouting]'s `DeepLinkDestination.PasswordRecovery`,
+ * routed by `MainActivity.kt` to [com.BreadIQ.myapp.screens.SetNewPasswordScreen]).
  */
 interface AuthServicing {
     /** The session that already exists at launch, if any. */
@@ -46,6 +42,17 @@ interface AuthServicing {
     suspend fun signOut()
     suspend fun updateDisplayName(name: String, user: CurrentUser)
     suspend fun requestPasswordReset(email: String): Result<Unit>
+    /**
+     * Adopts a password-recovery session (from a `breadiq-mobile://reset-password#...`/
+     * `https://breadiq.io/reset-password#...` deep link) and sets a new
+     * password on it — the real backend for
+     * [com.BreadIQ.myapp.screens.SetNewPasswordScreen]. Mirrors iOS's
+     * `AuthServicing.completePasswordRecovery` exactly; see
+     * [SupabaseAuthService]'s own implementation doc comment for how this
+     * differs structurally from the iOS port's hand-rolled REST call
+     * (this port uses the official `supabase-kt` SDK throughout).
+     */
+    suspend fun completePasswordRecovery(accessToken: String, refreshToken: String, newPassword: String): Result<CurrentUser>
     /**
      * The current session's raw access token, for callers that need to
      * authenticate directly against the custom backend (not Supabase
@@ -69,6 +76,7 @@ class UnconfiguredAuthService : AuthServicing {
     override suspend fun signOut() {}
     override suspend fun updateDisplayName(name: String, user: CurrentUser) {}
     override suspend fun requestPasswordReset(email: String): Result<Unit> = Result.failure(notReady)
+    override suspend fun completePasswordRecovery(accessToken: String, refreshToken: String, newPassword: String): Result<CurrentUser> = Result.failure(notReady)
     override suspend fun currentAccessToken(): String? = null
 
     private companion object {

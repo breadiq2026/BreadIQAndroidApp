@@ -57,6 +57,7 @@ import com.BreadIQ.myapp.ui.queue.QueueScreen
 import com.BreadIQ.myapp.ui.recipes.RecipesScreen
 import com.BreadIQ.myapp.ui.schedule.ScheduleScreen
 import com.BreadIQ.myapp.ui.settings.ConnectBrowserScreen
+import com.BreadIQ.myapp.ui.settings.IngredientCostsScreen
 import com.BreadIQ.myapp.ui.settings.SettingsScreen
 import com.BreadIQ.myapp.ui.theme.BreadIQTheme
 import com.BreadIQ.myapp.ui.subscription.SubscriptionScreen
@@ -369,11 +370,22 @@ fun BreadIQApp(
                     temperatureUnitStore = temperatureUnitStore,
                     onOpenSubscription = { navController.navigate(BreadIQRoutes.SUBSCRIPTION) },
                     onOpenConnectBrowser = { navController.navigate(BreadIQRoutes.CONNECT_BROWSER) },
+                    onOpenIngredientCosts = { navController.navigate(BreadIQRoutes.INGREDIENT_COSTS) },
                     onClose = { navController.popBackStack() },
                 )
             }
             composable(BreadIQRoutes.CONNECT_BROWSER) {
                 ConnectBrowserScreen(onClose = { navController.popBackStack() })
+            }
+            // Ingredient Costs ("Ingredient Library") — reads the same
+            // shared subscriptionViewModel for its premium gate, not a
+            // fresh instance, matching SettingsScreen's own access.
+            composable(BreadIQRoutes.INGREDIENT_COSTS) {
+                IngredientCostsScreen(
+                    subscriptionViewModel = subscriptionViewModel,
+                    onOpenSubscription = { navController.navigate(BreadIQRoutes.SUBSCRIPTION) },
+                    onClose = { navController.popBackStack() },
+                )
             }
             composable(BreadIQDestination.RECIPES.route) {
                 RecipesScreen(

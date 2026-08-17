@@ -28,8 +28,9 @@ enum class BreadIQDestination(val route: String, val label: String, val icon: Im
 /**
  * Additional pushed/sheet-presented routes from `AppRouter.swift`
  * (bake detail, settings, ingredient costs, connect browser, the
- * subscription paywall sheet). Stubbed out for now — wired up to real
- * NavHost destinations as each screen gets ported. See PORTING_PLAN.md.
+ * subscription paywall sheet). All wired up to real `NavHost`
+ * destinations now — reserved ahead of time in earlier sessions,
+ * as documented in PORTING_PLAN.md.
  */
 object BreadIQRoutes {
     const val BAKE_DETAIL = "bake_detail/{sessionId}"

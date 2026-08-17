@@ -74,11 +74,11 @@ import kotlinx.coroutines.launch
  * `Alert.alert` structure, ported here as two independent booleans, the
  * second set from the first's own confirm action.
  *
- * **"Ingredient Costs" stays disabled/dimmed this session** — it points
- * at `IngredientCostsScreen`, a separate, unstarted 477-line porting
- * item, not a Settings sub-feature. Real row, clearly present, just not
- * wired to a working destination yet — same established pattern this
- * codebase used for the Settings gear icon itself before this session.
+ * **"Ingredient Costs" is real now** — it navigates to `IngredientCostsScreen`,
+ * ported in the smaller-screens sweep's own follow-up session (was
+ * disabled/dimmed here before that, the same established pattern this
+ * codebase used for the Settings gear icon itself before the previous
+ * session).
  */
 @Composable
 fun SettingsScreen(
@@ -88,6 +88,7 @@ fun SettingsScreen(
     temperatureUnitStore: TemperatureUnitStore,
     onOpenSubscription: () -> Unit = {},
     onOpenConnectBrowser: () -> Unit = {},
+    onOpenIngredientCosts: () -> Unit = {},
     onClose: () -> Unit = {},
 ) {
     val colors = LocalBreadIQColors.current
@@ -126,7 +127,7 @@ fun SettingsScreen(
                     openManageSubscription(context) { manageSubscriptionErrorMessage = it }
                 },
             )
-            PremiumToolsSection()
+            PremiumToolsSection(onOpenIngredientCosts = onOpenIngredientCosts)
             BrowserImportSection(onOpenConnectBrowser = onOpenConnectBrowser)
             AppSection(
                 unit = unit,
@@ -351,15 +352,14 @@ private fun TrialBanner(onClick: () -> Unit) {
 // MARK: - Premium Tools section
 
 @Composable
-private fun PremiumToolsSection() {
+private fun PremiumToolsSection(onOpenIngredientCosts: () -> Unit) {
     SectionBlock(title = "PREMIUM TOOLS") {
         SettingsRow(
             icon = Icons.Filled.AttachMoney,
             label = "Ingredient Costs",
             description = "Set your actual prices for precise cost analysis",
             badge = "⭐ Premium",
-            enabled = false,
-            onClick = {},
+            onClick = onOpenIngredientCosts,
         )
     }
 }

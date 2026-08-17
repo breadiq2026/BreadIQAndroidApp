@@ -14,6 +14,8 @@ import com.BreadIQ.myapp.core.BakeStepAssembler
 import com.BreadIQ.myapp.core.CalculatorFormatting
 import com.BreadIQ.myapp.core.FormulaCalculator
 import com.BreadIQ.myapp.core.FormulaInput
+import com.BreadIQ.myapp.core.IngredientCostSyncing
+import com.BreadIQ.myapp.core.UnconfiguredIngredientCostSyncService
 import com.BreadIQ.myapp.core.ProofStageNarrator
 import com.BreadIQ.myapp.core.ProofTimeCalculator
 import com.BreadIQ.myapp.core.ProofTimeInput
@@ -21,6 +23,10 @@ import com.BreadIQ.myapp.core.RawScheduledBakePlan
 import com.BreadIQ.myapp.core.RecipeXLSXExportContext
 import com.BreadIQ.myapp.core.RecipeXLSXExporter
 import com.BreadIQ.myapp.core.swiftRounded
+import com.BreadIQ.myapp.data.BackendApiClient
+import com.BreadIQ.myapp.data.BackendIngredientCostSyncService
+import com.BreadIQ.myapp.data.SupabaseAuthService
+import com.BreadIQ.myapp.data.SupabaseClientProvider
 import com.BreadIQ.myapp.data.TemperatureUnitStore
 import com.BreadIQ.myapp.data.local.BakeSessionDao
 import com.BreadIQ.myapp.data.local.DatabaseProvider
@@ -279,6 +285,18 @@ class CalculatorViewModel(
     private val appContext: Context,
     /** The shared, Activity-scoped [SubscriptionViewModel] — see [CalculatorUiState.userTier]'s own doc comment. */
     private val subscriptionViewModel: SubscriptionViewModel,
+    /**
+     * `GET /api/reference-prices`, for [CalculatorUiState.serverReferencePrices].
+     * **A fresh, independent instance — not shared with
+     * [IngredientCostsViewModel]'s own, separate
+     * [com.BreadIQ.myapp.core.IngredientCostSyncing] instance/fetch.**
+     * Matches a real, deliberate duplication in the iOS source: the
+     * Calculator screen and the Ingredient Costs screen each
+     * independently fetch this same public endpoint, with their own
+     * local state — not a gap to consolidate, see [CalculatorViewModelFactory]'s
+     * own doc comment.
+     */
+    private val ingredientCostSyncService: IngredientCostSyncing = UnconfiguredIngredientCostSyncService(),
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(CalculatorUiState(temperatureUnit = temperatureUnitStore.unit.value))
@@ -309,6 +327,15 @@ class CalculatorViewModel(
             bakeSessionDao.observeAll().collect { rows ->
                 update { it.copy(sessions = rows.map { row -> row.toDomain() }) }
             }
+        }
+        // GET /api/reference-prices, once — populates the previously-dead
+        // serverReferencePrices field so CostAnalysisCard's calcBatchCost
+        // call actually reflects live server prices, not just the
+        // bundled catalog. See this ViewModel's own constructor doc
+        // comment on why this is a separate fetch from IngredientCostsViewModel's.
+        viewModelScope.launch {
+            val fetch = ingredientCostSyncService.fetchReferencePrices()
+            if (fetch != null) update { it.copy(serverReferencePrices = fetch.prices) }
         }
         viewModelScope.launch {
             subscriptionViewModel.uiState.collect { subState ->
@@ -851,6 +878,15 @@ class CalculatorViewModel(
  * the same one `SettingsScreen`'s temperature-unit row writes to, so a
  * change there reaches every live `CalculatorViewModel` immediately (see
  * [TemperatureUnitStore]'s own doc comment).
+ *
+ * The [com.BreadIQ.myapp.core.IngredientCostSyncing] instance built here
+ * is a fresh [com.BreadIQ.myapp.data.BackendIngredientCostSyncService]
+ * every call, **deliberately not threaded from `MainActivity`/shared
+ * with `IngredientCostsViewModelFactory`** — matches a real, intentional
+ * duplication in the iOS source (two independent screens, two
+ * independent fetches of the same public endpoint, no shared cache), not
+ * a gap to consolidate. See [CalculatorViewModel]'s own constructor doc
+ * comment.
  */
 class CalculatorViewModelFactory(
     private val context: Context,
@@ -860,6 +896,9 @@ class CalculatorViewModelFactory(
     override fun <T : ViewModel> create(modelClass: Class<T>): T {
         val appContext = context.applicationContext
         val db = DatabaseProvider.getInstance(appContext)
+        val backendClient = BackendApiClient(accessTokenProvider = {
+            SupabaseAuthService(SupabaseClientProvider.getInstance(appContext)).currentAccessToken()
+        })
         @Suppress("UNCHECKED_CAST")
         return CalculatorViewModel(
             recipeDao = db.recipeDao(),
@@ -869,6 +908,7 @@ class CalculatorViewModelFactory(
             temperatureUnitStore = temperatureUnitStore,
             appContext = appContext,
             subscriptionViewModel = subscriptionViewModel,
+            ingredientCostSyncService = BackendIngredientCostSyncService(backendClient),
         ) as T
     }
 }

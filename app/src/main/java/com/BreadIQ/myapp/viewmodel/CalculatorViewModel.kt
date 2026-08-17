@@ -192,7 +192,13 @@ data class CalculatorUiState(
     /** Mirrors the source's live `@Query private var sessions: [BakeSession]` — needed by [BakeSessionEngine.startBake]'s own active-bake-limit gate. */
     val sessions: List<BakeSession> = emptyList(),
 
-    /** Mirrors the source's `@Environment(TemperatureUnitStore.self)` — see [TemperatureUnitStore]'s own doc comment for why this can't be changed from any UI yet. */
+    /**
+     * Mirrors the source's `@Environment(TemperatureUnitStore.self)` —
+     * kept live from the shared [TemperatureUnitStore] (see that class's
+     * own doc comment for the reactivity fix): `SettingsScreen`'s
+     * temperature-unit row calls [TemperatureUnitStore.setUnit] and this
+     * field updates immediately, no relaunch needed.
+     */
     val temperatureUnit: TemperatureUnit = TemperatureUnit.FAHRENHEIT,
 
     /**
@@ -275,10 +281,15 @@ class CalculatorViewModel(
     private val subscriptionViewModel: SubscriptionViewModel,
 ) : ViewModel() {
 
-    private val _uiState = MutableStateFlow(CalculatorUiState(temperatureUnit = temperatureUnitStore.unit))
+    private val _uiState = MutableStateFlow(CalculatorUiState(temperatureUnit = temperatureUnitStore.unit.value))
     val uiState: StateFlow<CalculatorUiState> = _uiState.asStateFlow()
 
     init {
+        viewModelScope.launch {
+            temperatureUnitStore.unit.collect { unit ->
+                update { it.copy(temperatureUnit = unit) }
+            }
+        }
         viewModelScope.launch {
             recipeDao.observeAll().collect { entities ->
                 update { it.copy(recipes = entities.map { entity -> entity.toDomain() }) }
@@ -316,7 +327,7 @@ class CalculatorViewModel(
     fun nextCard() = update { it.copy(cardIndex = (it.cardIndex + 1).coerceAtMost(4)) }
     fun previousCard() = update { it.copy(cardIndex = (it.cardIndex - 1).coerceAtLeast(0)) }
 
-    /** `showUpgradeAlert()`. The source's alert offers "See Plans" (→ the subscription paywall) alongside "Maybe later" — this port shows a single dismiss button instead, since no `SubscriptionScreen` exists yet to route "See Plans" to (its own separate, already-planned sequence item). */
+    /** `showUpgradeAlert()`. The source's alert offers "See Plans" (→ the subscription paywall) alongside "Maybe later" — `CalculatorScreen.kt`'s own alert now shows both real buttons, matching the source exactly. */
     fun showUpgradeAlert(title: String, body: String) = update { it.copy(upgradePromptTitle = title, upgradePromptBody = body) }
 
     // MARK: - Actions
@@ -833,19 +844,29 @@ class CalculatorViewModel(
  * `NutritionAnalysisScreen`/`AutolyseGuidanceScreen` nav-route call site
  * and none of them should ever end up with their own independent
  * `SubscriptionViewModel`.
+ *
+ * [temperatureUnitStore] is likewise the app's single shared instance
+ * (also constructed once in `MainActivity`, threaded through `BreadIQApp`)
+ * rather than a fresh `TemperatureUnitStore(prefs)` per factory call —
+ * the same one `SettingsScreen`'s temperature-unit row writes to, so a
+ * change there reaches every live `CalculatorViewModel` immediately (see
+ * [TemperatureUnitStore]'s own doc comment).
  */
-class CalculatorViewModelFactory(private val context: Context, private val subscriptionViewModel: SubscriptionViewModel) : ViewModelProvider.Factory {
+class CalculatorViewModelFactory(
+    private val context: Context,
+    private val subscriptionViewModel: SubscriptionViewModel,
+    private val temperatureUnitStore: TemperatureUnitStore,
+) : ViewModelProvider.Factory {
     override fun <T : ViewModel> create(modelClass: Class<T>): T {
         val appContext = context.applicationContext
         val db = DatabaseProvider.getInstance(appContext)
-        val prefs = appContext.getSharedPreferences("breadiq_prefs", Context.MODE_PRIVATE)
         @Suppress("UNCHECKED_CAST")
         return CalculatorViewModel(
             recipeDao = db.recipeDao(),
             queuedBakeDao = db.queuedBakeDao(),
             ingredientPriceOverrideDao = db.ingredientPriceOverrideDao(),
             bakeSessionDao = db.bakeSessionDao(),
-            temperatureUnitStore = TemperatureUnitStore(prefs),
+            temperatureUnitStore = temperatureUnitStore,
             appContext = appContext,
             subscriptionViewModel = subscriptionViewModel,
         ) as T

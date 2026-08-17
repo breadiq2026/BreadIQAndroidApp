@@ -111,10 +111,10 @@ class ImportViewModel(
 
     private val _uiState = MutableStateFlow(
         ImportUiState(
-            temperatureUnit = temperatureUnitStore.unit,
+            temperatureUnit = temperatureUnitStore.unit.value,
             env = ImportEnvState(
-                ambientTemp = TemperatureFormatting.editableText(75.0, temperatureUnitStore.unit),
-                waterTemp = TemperatureFormatting.editableText(85.0, temperatureUnitStore.unit),
+                ambientTemp = TemperatureFormatting.editableText(75.0, temperatureUnitStore.unit.value),
+                waterTemp = TemperatureFormatting.editableText(85.0, temperatureUnitStore.unit.value),
             ),
         ),
     )

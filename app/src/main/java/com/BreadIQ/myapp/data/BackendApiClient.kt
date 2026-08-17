@@ -9,6 +9,7 @@ import io.ktor.client.statement.bodyAsText
 import io.ktor.http.ContentType
 import io.ktor.http.HttpMethod
 import io.ktor.http.contentType
+import kotlinx.serialization.Serializable
 
 /**
  * The custom BreadIQ backend (`api-server`, mounted at `/api`) — matches
@@ -80,3 +81,16 @@ class BackendApiClient(private val accessTokenProvider: suspend () -> String? = 
         null
     }
 }
+
+/**
+ * Ported from the iOS app's `Core/BackendAPIClient.swift`'s
+ * `BackendErrorResponse` — a non-2xx [BackendApiClient.RawResponse]'s
+ * body, when the backend sends one. Shared by every `Backend*Service`
+ * that needs to surface a real server error message instead of a
+ * generic fallback ([com.BreadIQ.myapp.data.BackendPairingCodeGenerator],
+ * [com.BreadIQ.myapp.data.BackendAccountService]), same "decode best
+ * effort, fall back to a canned message on failure" shape each of those
+ * uses.
+ */
+@Serializable
+data class BackendErrorResponse(val error: String? = null)

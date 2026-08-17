@@ -42,6 +42,7 @@ import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
 import com.BreadIQ.myapp.core.RawScheduledBakePlan
+import com.BreadIQ.myapp.data.TemperatureUnitStore
 import com.BreadIQ.myapp.navigation.BreadIQDestination
 import com.BreadIQ.myapp.navigation.BreadIQRoutes
 import com.BreadIQ.myapp.screens.AuthScreen
@@ -55,6 +56,8 @@ import com.BreadIQ.myapp.ui.lexicon.LexiconScreen
 import com.BreadIQ.myapp.ui.queue.QueueScreen
 import com.BreadIQ.myapp.ui.recipes.RecipesScreen
 import com.BreadIQ.myapp.ui.schedule.ScheduleScreen
+import com.BreadIQ.myapp.ui.settings.ConnectBrowserScreen
+import com.BreadIQ.myapp.ui.settings.SettingsScreen
 import com.BreadIQ.myapp.ui.theme.BreadIQTheme
 import com.BreadIQ.myapp.ui.subscription.SubscriptionScreen
 import com.BreadIQ.myapp.viewmodel.AuthViewModel
@@ -102,6 +105,20 @@ class MainActivity : ComponentActivity() {
     }
 
     /**
+     * Single shared instance, constructed once — same reasoning as
+     * [subscriptionViewModel] above, applied to a second cross-cutting
+     * preference with the identical "must propagate live to an
+     * already-alive `CalculatorViewModel`" shape (see
+     * [TemperatureUnitStore]'s own doc comment). Not a `ViewModel`
+     * itself: it exposes a `StateFlow` but has no coroutine work of its
+     * own beyond that, so a plain `by lazy` field is enough — no
+     * `ViewModelProvider.Factory` needed.
+     */
+    private val temperatureUnitStore: TemperatureUnitStore by lazy {
+        TemperatureUnitStore(applicationContext.getSharedPreferences("breadiq_prefs", android.content.Context.MODE_PRIVATE))
+    }
+
+    /**
      * Requested once, early — see `core/BakeNotificationScheduler.kt`'s
      * own doc comment on why this can't be lazy the way the iOS source's
      * `requestAuthorization()` is (Android's runtime permission dialog
@@ -139,7 +156,7 @@ class MainActivity : ComponentActivity() {
                 when {
                     uiState.isLoading -> LoadingScreen()
                     uiState.currentUser == null -> AuthScreen(authViewModel)
-                    else -> BreadIQApp(subscriptionViewModel)
+                    else -> BreadIQApp(authViewModel, subscriptionViewModel, temperatureUnitStore)
                 }
             }
         }
@@ -225,7 +242,11 @@ private fun LoadingScreen() {
 }
 
 @Composable
-fun BreadIQApp(subscriptionViewModel: SubscriptionViewModel) {
+fun BreadIQApp(
+    authViewModel: AuthViewModel,
+    subscriptionViewModel: SubscriptionViewModel,
+    temperatureUnitStore: TemperatureUnitStore,
+) {
     val navController = rememberNavController()
 
     // Recipes' "Load into Calculator" handoff — the Compose counterpart
@@ -275,7 +296,7 @@ fun BreadIQApp(subscriptionViewModel: SubscriptionViewModel) {
         ) {
             composable(BreadIQDestination.CALCULATOR.route) {
                 val context = LocalContext.current
-                val calculatorViewModel: CalculatorViewModel = viewModel(factory = CalculatorViewModelFactory(context, subscriptionViewModel))
+                val calculatorViewModel: CalculatorViewModel = viewModel(factory = CalculatorViewModelFactory(context, subscriptionViewModel, temperatureUnitStore))
                 LaunchedEffect(pendingRecipeId) {
                     val id = pendingRecipeId ?: return@LaunchedEffect
                     calculatorViewModel.loadFromRecipe(id)
@@ -287,6 +308,7 @@ fun BreadIQApp(subscriptionViewModel: SubscriptionViewModel) {
                     onOpenAutolyse = { navController.navigate(BreadIQRoutes.AUTOLYSE_GUIDANCE) },
                     onOpenImport = { navController.navigate(BreadIQRoutes.IMPORT) },
                     onOpenSubscription = { navController.navigate(BreadIQRoutes.SUBSCRIPTION) },
+                    onOpenSettings = { navController.navigate(BreadIQRoutes.SETTINGS) },
                     onStartedBake = { sessionId -> navController.navigate("bake_detail/$sessionId") },
                     onScheduleBake = { plan ->
                         pendingSchedulePlan = plan
@@ -301,7 +323,7 @@ fun BreadIQApp(subscriptionViewModel: SubscriptionViewModel) {
             composable(BreadIQRoutes.NUTRITION_ANALYSIS) {
                 val context = LocalContext.current
                 val parentEntry = remember { navController.getBackStackEntry(BreadIQDestination.CALCULATOR.route) }
-                val calculatorViewModel: CalculatorViewModel = viewModel(parentEntry, factory = CalculatorViewModelFactory(context, subscriptionViewModel))
+                val calculatorViewModel: CalculatorViewModel = viewModel(parentEntry, factory = CalculatorViewModelFactory(context, subscriptionViewModel, temperatureUnitStore))
                 val state by calculatorViewModel.uiState.collectAsStateWithLifecycle()
                 state.formulaResult?.let { formulaResult ->
                     NutritionAnalysisScreen(
@@ -316,7 +338,7 @@ fun BreadIQApp(subscriptionViewModel: SubscriptionViewModel) {
             composable(BreadIQRoutes.AUTOLYSE_GUIDANCE) {
                 val context = LocalContext.current
                 val parentEntry = remember { navController.getBackStackEntry(BreadIQDestination.CALCULATOR.route) }
-                val calculatorViewModel: CalculatorViewModel = viewModel(parentEntry, factory = CalculatorViewModelFactory(context, subscriptionViewModel))
+                val calculatorViewModel: CalculatorViewModel = viewModel(parentEntry, factory = CalculatorViewModelFactory(context, subscriptionViewModel, temperatureUnitStore))
                 val state by calculatorViewModel.uiState.collectAsStateWithLifecycle()
                 AutolyseGuidanceScreen(guidance = state.autolyseGuidance, onDismiss = { navController.popBackStack() })
             }
@@ -334,6 +356,24 @@ fun BreadIQApp(subscriptionViewModel: SubscriptionViewModel) {
             // `@Environment(SubscriptionStore.self)` access.
             composable(BreadIQRoutes.SUBSCRIPTION) {
                 SubscriptionScreen(viewModel = subscriptionViewModel, onClose = { navController.popBackStack() })
+            }
+            // Settings + Connect a Browser (execution-order item 7) — reads
+            // the same shared authViewModel/subscriptionViewModel/
+            // temperatureUnitStore this whole BreadIQApp was handed, not
+            // fresh instances, matching SettingsScreen.swift's own
+            // `@Environment` access to all three source stores.
+            composable(BreadIQRoutes.SETTINGS) {
+                SettingsScreen(
+                    authViewModel = authViewModel,
+                    subscriptionViewModel = subscriptionViewModel,
+                    temperatureUnitStore = temperatureUnitStore,
+                    onOpenSubscription = { navController.navigate(BreadIQRoutes.SUBSCRIPTION) },
+                    onOpenConnectBrowser = { navController.navigate(BreadIQRoutes.CONNECT_BROWSER) },
+                    onClose = { navController.popBackStack() },
+                )
+            }
+            composable(BreadIQRoutes.CONNECT_BROWSER) {
+                ConnectBrowserScreen(onClose = { navController.popBackStack() })
             }
             composable(BreadIQDestination.RECIPES.route) {
                 RecipesScreen(

@@ -53,6 +53,11 @@ android {
     }
     buildFeatures {
         compose = true
+        // Settings screen's Version row reads BuildConfig.VERSION_NAME live
+        // (rather than a second, driftable hardcoded literal); the Manage
+        // Subscription deep link reads BuildConfig.APPLICATION_ID the same
+        // way, instead of hardcoding "com.BreadIQ.myapp" a second time.
+        buildConfig = true
     }
 }
 

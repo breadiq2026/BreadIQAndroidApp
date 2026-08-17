@@ -80,11 +80,13 @@ class UnconfiguredAuthService : AuthServicing {
 
 /**
  * Ported from the iOS app's `Stores/AuthStore.swift`'s `AccountServicing`
- * protocol — seam for a future "Backend REST API client" item
- * (`DELETE /api/me`), kept separate from [AuthServicing] since account
- * deletion hits the custom backend directly, not Supabase itself. No
- * backend client exists on Android yet, so [UnconfiguredAccountService]
- * is the only implementation for now.
+ * protocol — seam for `DELETE /api/me`, kept separate from
+ * [AuthServicing] since account deletion hits the custom backend
+ * directly, not Supabase itself. **Real now**:
+ * [com.BreadIQ.myapp.data.BackendAccountService] (Settings + Connect-a-Browser
+ * session) is wired into [com.BreadIQ.myapp.viewmodel.AuthViewModelFactory]
+ * for real; [UnconfiguredAccountService] remains as the honest fallback
+ * for any call site that doesn't thread a real implementation in.
  */
 interface AccountServicing {
     suspend fun deleteAccount(): Result<Unit>

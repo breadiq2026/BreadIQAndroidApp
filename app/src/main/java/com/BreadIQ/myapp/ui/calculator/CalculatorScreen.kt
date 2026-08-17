@@ -46,6 +46,7 @@ import com.BreadIQ.myapp.core.HapticImpactStyle
 import com.BreadIQ.myapp.core.HapticNotificationType
 import com.BreadIQ.myapp.core.Haptics
 import com.BreadIQ.myapp.core.RawScheduledBakePlan
+import com.BreadIQ.myapp.data.TemperatureUnitStore
 import com.BreadIQ.myapp.model.calculatorCardTitles
 import com.BreadIQ.myapp.ui.components.BreadIQButton
 import com.BreadIQ.myapp.ui.components.BreadIQButtonVariant
@@ -62,29 +63,32 @@ import com.BreadIQ.myapp.viewmodel.SubscriptionViewModelFactory
  * `CalculatorResultsCard.kt` (next commits); this file owns navigation
  * chrome only, matching the source's own `body`/`header`/`footer` split.
  *
- * **Import is now real** (camera scan/import Session B) — `ImportScreen`
- * (`ImportModal`/`ImportModalFormatting`'s port) is a real Compose Navigation
- * route, wired below. Settings is still disabled here — no `SettingsScreen`
- * exists on this port yet (a separate, unstarted sequence item), so the
- * gear button would have nowhere real to navigate; shown dimmed rather
- * than wired to a no-op, so it doesn't read as a working control that
- * silently does nothing.
+ * **Import and Settings are both real now.** `ImportScreen`
+ * (`ImportModal`/`ImportModalFormatting`'s port) and the new
+ * `SettingsScreen` (Settings + Connect-a-Browser session) are both real
+ * Compose Navigation routes, wired below — the gear icon that used to sit
+ * dimmed with nowhere to navigate now opens Settings for real.
  */
 @Composable
 fun CalculatorScreen(
     modifier: Modifier = Modifier,
-    // The default here isn't the shared Activity-scoped SubscriptionViewModel
-    // MainActivity.kt's BreadIQApp() threads in explicitly — it's a
-    // fallback only, for a caller that doesn't pass `viewModel:` itself
-    // (nothing in this app actually relies on it; every real call site
-    // passes an explicit `viewModel`).
+    // The default here isn't the shared Activity-scoped SubscriptionViewModel/
+    // TemperatureUnitStore MainActivity.kt's BreadIQApp() threads in
+    // explicitly — it's a fallback only, for a caller that doesn't pass
+    // `viewModel:` itself (nothing in this app actually relies on it;
+    // every real call site passes an explicit `viewModel`).
     viewModel: CalculatorViewModel = viewModel(
-        factory = CalculatorViewModelFactory(LocalContext.current, viewModel(factory = SubscriptionViewModelFactory(LocalContext.current))),
+        factory = CalculatorViewModelFactory(
+            LocalContext.current,
+            viewModel(factory = SubscriptionViewModelFactory(LocalContext.current)),
+            TemperatureUnitStore(LocalContext.current.getSharedPreferences("breadiq_prefs", android.content.Context.MODE_PRIVATE)),
+        ),
     ),
     onOpenNutrition: () -> Unit = {},
     onOpenAutolyse: () -> Unit = {},
     onOpenImport: () -> Unit = {},
     onOpenSubscription: () -> Unit = {},
+    onOpenSettings: () -> Unit = {},
     onStartedBake: (String) -> Unit = {},
     onScheduleBake: (RawScheduledBakePlan) -> Unit = {},
 ) {
@@ -102,6 +106,7 @@ fun CalculatorScreen(
             onCardIndexChange = viewModel::goToCard,
             onResetClick = { viewModel.update { it.copy(showResetConfirm = true) } },
             onImportClick = onOpenImport,
+            onSettingsClick = onOpenSettings,
         )
 
         Column(
@@ -224,6 +229,7 @@ private fun CalculatorHeader(
     onCardIndexChange: (Int) -> Unit,
     onResetClick: () -> Unit,
     onImportClick: () -> Unit,
+    onSettingsClick: () -> Unit,
 ) {
     val colors = LocalBreadIQColors.current
     Column(
@@ -262,14 +268,13 @@ private fun CalculatorHeader(
                 ) {
                     Icon(Icons.Filled.Refresh, contentDescription = "Start Over", tint = colors.mutedForeground, modifier = Modifier.size(14.dp))
                 }
-                // Deferred: no SettingsScreen port exists yet — see this file's own doc comment.
                 Box(
                     contentAlignment = Alignment.Center,
                     modifier = Modifier
-                        .alpha(0.5f)
                         .size(30.dp)
                         .clip(CircleShape)
-                        .background(colors.muted.copy(alpha = 0.6f)),
+                        .background(colors.muted.copy(alpha = 0.6f))
+                        .clickable(onClick = onSettingsClick),
                 ) {
                     Icon(Icons.Filled.Settings, contentDescription = "Settings", tint = colors.mutedForeground, modifier = Modifier.size(14.dp))
                 }

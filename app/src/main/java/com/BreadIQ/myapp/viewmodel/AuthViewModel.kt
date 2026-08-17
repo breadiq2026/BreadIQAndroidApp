@@ -9,6 +9,8 @@ import androidx.lifecycle.viewModelScope
 import com.BreadIQ.myapp.data.AccountServicing
 import com.BreadIQ.myapp.data.AuthLifecycleSyncing
 import com.BreadIQ.myapp.data.AuthServicing
+import com.BreadIQ.myapp.data.BackendAccountService
+import com.BreadIQ.myapp.data.BackendApiClient
 import com.BreadIQ.myapp.data.SupabaseAuthService
 import com.BreadIQ.myapp.data.SupabaseClientProvider
 import com.BreadIQ.myapp.data.UnconfiguredAccountService
@@ -140,9 +142,16 @@ class AuthViewModelFactory(private val context: Context) : ViewModelProvider.Fac
         val appContext = context.applicationContext
         val client = SupabaseClientProvider.getInstance(appContext)
         val prefs = appContext.getSharedPreferences("breadiq_prefs", Context.MODE_PRIVATE)
+        // Real BackendAccountService now, not the UnconfiguredAccountService()
+        // default — same BackendApiClient(accessTokenProvider: ...) shape
+        // SubscriptionViewModelFactory already established for BackendTierService.
+        val backendClient = BackendApiClient(accessTokenProvider = {
+            SupabaseAuthService(client).currentAccessToken()
+        })
         @Suppress("UNCHECKED_CAST")
         return AuthViewModel(
             service = SupabaseAuthService(client),
+            accountService = BackendAccountService(backendClient),
             prefs = prefs,
         ) as T
     }

@@ -361,9 +361,117 @@ Concrete order:
      Detail and Schedule routes, and a `pendingSchedulePlan` handoff
      value mirroring the existing `pendingRecipeId` pattern.
 6. **RevenueCat + Subscription screen** (`RevenueCatPurchasesService.swift`,
-   `RevenueCatTierResolution.swift`, `SubscriptionStore.swift`,
-   `SubscriptionScreen.swift`) -- independent vertical, slotted here so
-   paywall gating exists before final polish.
+   `RevenueCatTierResolution.swift`, `SubscriptionFormatting.swift`,
+   `SubscriptionPackageClassification.swift`, `SubscriptionStore.swift`,
+   `SubscriptionScreen.swift`) -- ✅ done 2026-08-17, 1 commit.
+   `CalculatorViewModel.userTier` is real everywhere now, replacing its
+   hardcoded `BakeUserTier.FREE`.
+
+   **Pure logic ports (`core/RevenueCatTierResolution.kt`,
+   `core/SubscriptionFormatting.kt`, `core/SubscriptionPackageClassification.kt`)
+   went straight across** -- same tier-resolution precedence
+   (pre-alpha override -> a non-free RevenueCat tier always wins outright
+   -> else fall back to the server), same `preAlphaModeEnabled = false`
+   live mobile/web drift (`true` on web, ported as a real flippable
+   constant, not omitted), same structural product-identifier
+   classification (prefix + exactly two dot-separated components) in
+   place of fragile title/identifier substring matching.
+
+   **`com.revenuecat.purchases:purchases` 10.16.2** (confirmed latest
+   stable directly against Maven Central's own metadata) -- configured
+   once in `BreadIQApplication.onCreate()` with the Play Store app's
+   public SDK key, mirroring `Purchases.configure(withAPIKey:)` in
+   `BreadIQApp.init()`. `core/RevenueCatPurchasesService.kt` uses the
+   SDK's own Kotlin coroutine `awaitX()` suspend extensions
+   (`awaitCustomerInfo`/`awaitLogIn`/`awaitLogOut`/`awaitRestore`/
+   `awaitOfferings`/`awaitPurchase`), confirmed current against the
+   pinned release, not the older callback-based API.
+
+   **Two real Android SDK shape differences from iOS, documented inline,
+   not straight ports**:
+   - Google Play Billing's purchase flow needs a live `Activity` to
+     launch its UI from; StoreKit's doesn't.
+     `PurchasesServicing.purchase(activity:productIdentifier:)` takes
+     one, threaded from `SubscriptionScreen.kt`'s own `LocalContext.current`
+     at the moment of the tap (via a small `Context.findActivity()`
+     helper) rather than stored anywhere -- the same Context/Activity
+     boundary every other camera/picker/permission-needing feature in
+     this app already established.
+   - Android Billing models trial/intro pricing as a `SubscriptionOption`'s
+     ordered `PricingPhase`s (`freePhase`/`introPhase`/`fullPricePhase`),
+     not StoreKit's single `introductoryDiscount` field --
+     `RevenueCatPurchasesService.introPrice(from:)` maps this onto the
+     existing `SubscriptionIntroPrice` shape; cancellation is detected
+     via the SDK's own `PurchasesTransactionException.userCancelled`
+     (thrown by `awaitPurchase`), not a `result.userCancelled` boolean
+     field the way iOS's `purchase()` returns it -- both confirmed
+     directly against the real 10.16.2 SDK jar (it compiled clean on the
+     first build-verify pass against every inferred method/property name).
+
+   **`data/BackendApiClient.kt` extended, not replaced, per its own
+   prior doc comment** -- now a real `class` (was an `object`) taking a
+   constructor-injected `accessTokenProvider: suspend () -> String?`,
+   matching the source's own `BackendAPIClient(accessTokenProvider:)`
+   construction exactly; gained GET support and a status-code-aware
+   `RawResponse`. `BackendImportURLFetcher` (the only prior caller)
+   updated to build its own unauthenticated instance internally --
+   its own call site and behavior are unchanged.
+   `data/BackendTierService.kt` is the new authenticated `GET /api/me/tier`
+   caller, built with a real `SupabaseAuthService.currentAccessToken`-backed
+   provider. `TierInfo` gained `@Serializable` (decodes the response
+   directly, field-for-field, no mapping needed, confirmed against the
+   source).
+
+   **`viewmodel/SubscriptionViewModel.kt` is Activity-scoped** (`by
+   viewModels {}` in `MainActivity`, the same precedent `AuthViewModel`
+   already established) -- the architecture decision this session's own
+   handoff called out as unresolved, now resolved: this store needs to
+   be readable from `MainActivity`'s own login/logout binding, from
+   `CalculatorViewModel` (threaded in via `CalculatorViewModelFactory`,
+   now taking a `SubscriptionViewModel` param), and from
+   `SubscriptionScreen` itself. `refreshTier()`/`refreshOfferings()`
+   fire once from `init` -- the direct analog of the source's
+   `SubscriptionProvider` firing both queries at mount.
+   `MainActivity.kt`'s own login/logout binding
+   (`AuthPhase`/`subscriptionAction(for:)`) ports `RootView.swift`'s
+   three-way branch exactly, including its `.id`-only keying reasoning
+   (a display-name edit shouldn't spuriously re-fire `login`).
+
+   **`ui/subscription/SubscriptionScreen.kt`** -- the full paywall UI:
+   tier/period toggles with a "Save X%" annual badge, the static
+   feature-comparison card (`tierFeatures`, real marketing copy ported
+   verbatim -- one deliberate word substitution, "iOS" -> "Android" in
+   the two active-bake-limit lines, since shipping literal "on iOS" copy
+   in the Android app would be a plain copy bug, not a legitimate
+   cross-platform difference worth preserving), a trial-aware price
+   block, a custom dimmed `ConfirmModalOverlay` (not a native dialog,
+   matching the source's own transparent full-screen modal) before the
+   real purchase call, and the three outcome alerts (success/failure
+   suppressed-for-cancellation/restore). Reached from Calculator's
+   upgrade-prompt alert's new "See Plans" button (`showUpgradeAlert`'s
+   own doc comment previously said this port only showed a single
+   dismiss button "since no `SubscriptionScreen` exists yet" -- no
+   longer true, updated) via the already-reserved
+   `BreadIQRoutes.SUBSCRIPTION` route.
+
+   **Open decision, flagged rather than guessed at, per direct
+   instruction**: Play Store subscription products don't exist yet (no
+   build uploaded, nothing created in Play Console's Monetize section).
+   `SubscriptionPackageClassification.EXPECTED_PREFIX` reuses iOS's real
+   `io.breadiq.app.` prefix as a placeholder -- Play Console product IDs
+   have no bundle-ID-style constraint the way Apple's do, so this
+   doesn't have to match, but reusing the identical convention keeps the
+   classifier logic identical cross-platform, the simplest option once
+   real products get created. Revisit then.
+
+   **Purchase-flow-testing boundary, matching the iOS port's own
+   documented sandbox-tester limit**: `activeEntitlements()`/
+   `fetchOfferings()` are plain reads, verified live, not blocked on
+   RevenueCat dashboard validation. A full completed purchase needs a
+   Play Console license tester + real subscription products, neither of
+   which exist yet -- built and wired for real, compiles clean against
+   the live SDK, full purchase-flow verification waits for those two
+   prerequisites.
 7. **Platform integrations, one session each** (not bundled as "step 8"):
    - Camera scan/import -- `RecipeScanner.swift`, `ImportAnalyzer.swift`,
      `ImportModal.swift`, `ImportReviewScreen.swift` (~93KB combined, the

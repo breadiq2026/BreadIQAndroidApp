@@ -808,6 +808,108 @@ Concrete order:
    `PendingImportsListScreen.swift` -- leftover screens that don't fit
    cleanly into any vertical above.
 
+   **Settings + Connect a Browser -- ✅ done 2026-08-17, 1 commit.**
+   Combined into one session per direct instruction: on iOS, "Connect a
+   Browser" is reachable only from a `SettingsScreen` row, so building a
+   temporary shim to reach the pairing-code work and redoing it later
+   would have meant doing the same layout twice. `IngredientCostsScreen`
+   stays out of scope -- its own Settings row renders disabled/dimmed
+   (real UI, clearly present, not wired to a destination yet), the same
+   established pattern the Settings gear icon itself used before this
+   session. `SetNewPasswordScreen`/`DataStoreErrorScreen`/
+   `PendingImportsListScreen` are all still unstarted, not reachable from
+   Settings on iOS either.
+
+   Pure logic ports (straight across): `core/PairingCodeServices.kt`
+   (the `PairingCodeGenerating` seam, `Result<PairingCode>` rather than a
+   custom Result type -- matches `AuthServicing`'s own established
+   shape), `core/ConnectBrowserFormatting.kt` (countdown text/expiry/
+   cosmetic code-grouping, `java.time.Instant` math), `core/SettingsTierPresentation.kt`
+   (the tier row's four-way label/description branching).
+
+   ██ STUB-BACKEND ██, ported deliberately anyway (matches every other
+   `STUB-BACKEND`-tagged item in this codebase): `POST /api/auth/pairing-code/generate`
+   doesn't exist on `api-server` yet. `data/BackendPairingCodeGenerator.kt`
+   is written against the agreed `{ code, expiresAt }` contract and fails
+   today with a real, honest error -- nothing left to wire up client-side
+   once the route ships. Date parsing is genuinely simpler here than on
+   iOS: the source needs a custom `BackendDateCoding.decoder` because
+   Foundation's `.iso8601` strategy rejects this backend's
+   fractional-second timestamps; `java.time.Instant.parse(...)` handles
+   that format natively. A new shared `BackendErrorResponse` DTO
+   (`{ error }`, decoded from a non-2xx response body) lives alongside
+   `BackendApiClient`, reused by both this and `data/BackendAccountService.kt`.
+
+   `data/BackendAccountService.kt` -- real `AccountServicing`
+   implementation, `DELETE /api/me`. The seam already existed
+   (`AuthServicing.kt`'s `AccountServicing`/`UnconfiguredAccountService`,
+   `AuthViewModel.deleteAccount()` already called through to whatever was
+   injected) -- this session's only job was the real implementation and
+   threading it into `AuthViewModelFactory`, same
+   `BackendApiClient(accessTokenProvider: ...)` shape
+   `SubscriptionViewModelFactory` already established.
+
+   **A real architecture gap closed alongside this screen**:
+   `TemperatureUnitStore` used to be a plain `var`, read once at
+   `CalculatorViewModel` construction -- calling `setUnit` from a
+   freshly-constructed store inside a new Settings screen would have
+   silently not propagated to an already-alive `CalculatorViewModel`
+   until a full relaunch. Now backed by a `StateFlow<TemperatureUnit>`,
+   with **one shared instance** constructed once in `MainActivity` (a
+   plain `by lazy` field, not a `ViewModel` -- no coroutine work of its
+   own beyond exposing the flow) and threaded into both
+   `CalculatorViewModelFactory` and `SettingsScreen`, exactly the
+   `SubscriptionViewModel`/`CalculatorViewModel.userTier` live-binding
+   shape this codebase just established for the identical class of
+   problem, applied to a second cross-cutting preference.
+   `ImportViewModel`'s own `TemperatureUnitStore` stays a fresh
+   per-factory instance deliberately -- that screen is genuinely
+   self-contained (see its own doc comment), so it only needed the
+   `.value` read fixed, not the shared-instance treatment.
+
+   `ui/settings/ConnectBrowserScreen.kt` -- header, explainer card,
+   loading/code/error states, generate/regenerate button whose label
+   depends on state. Live countdown via a `LaunchedEffect` running a
+   `while (true) { delay(1000) }` loop -- the direct Compose equivalent
+   of the source's Combine `Timer.publish` -- cancelled automatically on
+   leaving composition, no manual teardown needed either way.
+
+   `ui/settings/SettingsScreen.kt` -- Account (tier row, trial banner,
+   Upgrade Plan row, Manage Subscription row gated on `rcTier != "free"`
+   per `SubscriptionUiState`'s own already-documented intent, email info
+   row), Premium Tools (Ingredient Costs, disabled), Browser Import
+   (Connect a Browser, no premium gate -- a plain account feature),  App
+   (Version row reading `BuildConfig.VERSION_NAME` live rather than
+   duplicating the `build.gradle.kts` version string as a second literal
+   the way the source's own hardcoded `"1.0.0"` does; the
+   `CalcChipRow`-based Temperature Unit row; Restore Purchases, fully
+   real via `SubscriptionViewModel.restorePurchases()`), Sign Out
+   (single destructive confirm), Delete Account (**double-confirm
+   structure ported exactly, not simplified to one dialog** -- tapping
+   "Delete Account" opens dialog 1, whose own destructive button opens
+   dialog 2 ("Are you sure? … There is no recovery."), and only dialog
+   2's confirm button calls `authViewModel.deleteAccount()`).
+
+   **Manage Subscription deep link -- Android specifics, not a straight
+   port.** iOS opens `itms-apps://apps.apple.com/account/subscriptions`;
+   the Play Store equivalent is
+   `https://play.google.com/store/account/subscriptions?package=<applicationId>`
+   (`BuildConfig.APPLICATION_ID`, not a second hardcoded package-name
+   literal), opened via a plain `Intent(Intent.ACTION_VIEW, ...)` wrapped
+   in a try/catch for the "nothing can open this" case -- real, working
+   system-API code today, the same RevenueCat/Billing-SDK-free boundary
+   the source itself draws around this call. `buildConfig = true` turned
+   on in `app/build.gradle.kts` (was off by default under AGP 8) so
+   `BuildConfig.VERSION_NAME`/`BuildConfig.APPLICATION_ID` exist to read.
+
+   Wiring: the Settings gear icon in `CalculatorScreen.kt`'s header --
+   dimmed and inert since the very first Calculator session -- now
+   navigates for real; `BreadIQRoutes.SETTINGS`/`CONNECT_BROWSER` (both
+   reserved ahead of time) wired into `MainActivity.kt`'s nav graph,
+   which now threads the shared `authViewModel` into `BreadIQApp()`
+   alongside `subscriptionViewModel` (needed by `SettingsScreen`'s email
+   row and sign-out/delete actions) for the first time.
+
 
 ## Explicitly out of scope for Android v1 (per `PRODUCT_ROADMAP.md`)
 

@@ -24,6 +24,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -43,9 +44,11 @@ import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
 import com.BreadIQ.myapp.core.RawScheduledBakePlan
 import com.BreadIQ.myapp.data.TemperatureUnitStore
+import com.BreadIQ.myapp.data.local.DatabaseProvider
 import com.BreadIQ.myapp.navigation.BreadIQDestination
 import com.BreadIQ.myapp.navigation.BreadIQRoutes
 import com.BreadIQ.myapp.screens.AuthScreen
+import com.BreadIQ.myapp.screens.DataStoreErrorScreen
 import com.BreadIQ.myapp.ui.bakedetail.BakeDetailScreen
 import com.BreadIQ.myapp.ui.calculator.AutolyseGuidanceScreen
 import com.BreadIQ.myapp.ui.calculator.CalculatorScreen
@@ -84,10 +87,18 @@ import com.BreadIQ.myapp.viewmodel.selectedShape
  * `RootView.swift`, which this same three-way split sits inside of on
  * iOS: no password-recovery deep-link branch (no deep-link infra exists
  * on Android yet — see `AuthServicing`'s own doc comment), no bake-session
- * reconciliation or subscription-store login/logout binding (those depend
- * on ported features — `BakeSessionEngine`, `SubscriptionStore` — that
- * don't exist here yet either). Just the auth split, which is what this
- * step's source-file list actually asked for.
+ * reconciliation (that depends on a ported feature — `BakeSessionEngine`
+ * — that doesn't exist here yet). Just the auth split, which is what
+ * this step's source-file list actually asked for.
+ *
+ * **A second, OUTER gate now wraps all of the above — [DbOpenState]** —
+ * the direct analog of `BreadIQApp.swift`'s own `if let modelContainer
+ * { RootView() /* includes its own auth branching */ } else {
+ * DataStoreErrorScreen() }`. The entire auth-gated block above (loading/
+ * signed-out/signed-in) only ever renders once Room's eagerly-forced
+ * open ([DatabaseProvider.openEagerly]) has actually succeeded — see
+ * [DbOpenState]'s own doc comment for why this ordering, not the new
+ * screen's visual layout, is the actual point of this restructuring.
  */
 class MainActivity : ComponentActivity() {
     private val authViewModel: AuthViewModel by viewModels {
@@ -138,26 +149,56 @@ class MainActivity : ComponentActivity() {
         requestBakeNotificationPermissionsIfNeeded()
         setContent {
             BreadIQTheme {
-                val uiState by authViewModel.uiState.collectAsStateWithLifecycle()
+                val appContext = applicationContext
+                var dbOpenState by remember { mutableStateOf<DbOpenState>(DbOpenState.Checking) }
+                // Incremented by DataStoreErrorScreen's "Try Again"/
+                // "Erase & Start Fresh" actions to re-trigger the
+                // LaunchedEffect below without relaunching the app —
+                // the direct analog of the source's own onRetry/
+                // onEraseAndRetry closures re-assigning modelContainer.
+                var dbRetryKey by remember { mutableIntStateOf(0) }
 
-                // RevenueCat identity binding (PORTING_PLAN.md step 6) —
-                // the direct analog of RootView.swift's own AuthPhase/
-                // subscriptionAction(for:) three-way branch. Deliberately
-                // keyed on currentUser?.id alone, not the whole
-                // CurrentUser? value — see authPhase()'s own doc comment.
-                val phase = authPhase(isLoading = uiState.isLoading, userId = uiState.currentUser?.id)
-                LaunchedEffect(phase) {
-                    when (val action = subscriptionAction(phase)) {
-                        is SubscriptionBindingAction.Login -> subscriptionViewModel.login(action.userId)
-                        SubscriptionBindingAction.Logout -> subscriptionViewModel.logout()
-                        null -> Unit
-                    }
+                LaunchedEffect(dbRetryKey) {
+                    dbOpenState = DbOpenState.Checking
+                    dbOpenState = DatabaseProvider.openEagerly(appContext).fold(
+                        onSuccess = { DbOpenState.Ready },
+                        onFailure = { DbOpenState.Failed(it) },
+                    )
                 }
 
-                when {
-                    uiState.isLoading -> LoadingScreen()
-                    uiState.currentUser == null -> AuthScreen(authViewModel)
-                    else -> BreadIQApp(authViewModel, subscriptionViewModel, temperatureUnitStore)
+                when (val state = dbOpenState) {
+                    DbOpenState.Checking -> LoadingScreen()
+                    is DbOpenState.Failed -> DataStoreErrorScreen(
+                        error = state.error,
+                        onRetry = { dbRetryKey++ },
+                        onEraseAndRetry = {
+                            DatabaseProvider.eraseLocalStore(appContext)
+                            dbRetryKey++
+                        },
+                    )
+                    DbOpenState.Ready -> {
+                        val uiState by authViewModel.uiState.collectAsStateWithLifecycle()
+
+                        // RevenueCat identity binding (PORTING_PLAN.md step 6) —
+                        // the direct analog of RootView.swift's own AuthPhase/
+                        // subscriptionAction(for:) three-way branch. Deliberately
+                        // keyed on currentUser?.id alone, not the whole
+                        // CurrentUser? value — see authPhase()'s own doc comment.
+                        val phase = authPhase(isLoading = uiState.isLoading, userId = uiState.currentUser?.id)
+                        LaunchedEffect(phase) {
+                            when (val action = subscriptionAction(phase)) {
+                                is SubscriptionBindingAction.Login -> subscriptionViewModel.login(action.userId)
+                                SubscriptionBindingAction.Logout -> subscriptionViewModel.logout()
+                                null -> Unit
+                            }
+                        }
+
+                        when {
+                            uiState.isLoading -> LoadingScreen()
+                            uiState.currentUser == null -> AuthScreen(authViewModel)
+                            else -> BreadIQApp(authViewModel, subscriptionViewModel, temperatureUnitStore)
+                        }
+                    }
                 }
             }
         }
@@ -233,6 +274,31 @@ private fun subscriptionAction(phase: AuthPhase): SubscriptionBindingAction? = w
     AuthPhase.Loading -> null
     AuthPhase.SignedOut -> SubscriptionBindingAction.Logout
     is AuthPhase.SignedIn -> SubscriptionBindingAction.Login(phase.userId)
+}
+
+/**
+ * The three states this Activity's outer, database-open gate actually
+ * distinguishes — the direct analog of `BreadIQApp.swift`'s own
+ * `modelContainer`/`modelContainerError` pair, just widened to a real
+ * sealed type instead of two independently-nilable `@State` fields,
+ * since Compose has no single-assignment-then-branch idiom that maps
+ * onto two separately-optional properties as cleanly as SwiftUI's `if
+ * let` does.
+ *
+ * **Why this gate has to wrap the entire auth-gated block, not sit
+ * alongside it**: `CalculatorViewModelFactory`/`IngredientCostsViewModelFactory`/
+ * every other DB-touching factory in this app calls
+ * `DatabaseProvider.getInstance(...)` and assumes it just works — none
+ * of them are equipped to handle a broken database. As long as
+ * [DbOpenState.Ready] is required before [AuthScreen]/[BreadIQApp] ever
+ * render (exactly like iOS's `RootView` sits entirely inside the `if
+ * let modelContainer` branch), none of those factories can ever be
+ * reached with a broken database underneath them.
+ */
+private sealed class DbOpenState {
+    data object Checking : DbOpenState()
+    data object Ready : DbOpenState()
+    data class Failed(val error: Throwable?) : DbOpenState()
 }
 
 @Composable

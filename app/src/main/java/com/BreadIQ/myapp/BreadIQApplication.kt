@@ -18,13 +18,14 @@ import com.revenuecat.purchases.PurchasesConfiguration
  *
  * `DatabaseProvider.getInstance(this)` below IS called eagerly here,
  * though — the direct structural parallel to `BreadIQApp.swift`'s
- * `init()` calling `Self.makeModelContainer()`. Unlike that call, this
- * one can't itself fail or signal anything meaningful yet (see
- * `data/local/BreadIQDatabase.kt`'s doc comment on why Room's lazy-open
- * model has no single construction-time success/failure point the way
- * SwiftData's `ModelContainer` does) — this just ensures the singleton
- * exists from launch, matching the iOS call site's timing even though
- * the two calls can't behave identically yet.
+ * `init()` calling `Self.makeModelContainer()`. This call alone still
+ * can't fail or signal anything meaningful (Room's `.build()` stays
+ * lazy no matter when it's called) — it just ensures the singleton
+ * exists from launch, matching the iOS call site's timing. The actual
+ * success/failure signal now comes from `MainActivity.kt`'s own
+ * `DatabaseProvider.openEagerly` call, made once per launch (and again
+ * on retry/erase) from its `DbOpenState` gate — see that class's and
+ * `DatabaseProvider`'s own doc comments for the fuller writeup.
  *
  * [Purchases.configure] is called eagerly here too (PORTING_PLAN.md
  * step 6) — must run before any other `Purchases` API call, so it has

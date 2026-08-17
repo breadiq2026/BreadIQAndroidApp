@@ -24,24 +24,16 @@ import androidx.room.TypeConverters
  * server backup to fall back on.
  *
  * **`makeModelContainer()`'s error-recovery story (`DataStoreErrorScreen`,
- * "Try Again"/"Erase & Start Fresh") has no equivalent here yet — a
- * deliberate scope decision, not an oversight.** SwiftData's
- * `ModelContainer(for:configurations:)` validates and opens the store
- * *eagerly*, at construction time, so a corrupted store or failed
- * migration surfaces immediately as a thrown error iOS can catch right
- * at app launch and branch its root view on. Room's `.build()` is
- * *lazy* — it returns a working `BreadIQDatabase` reference immediately
- * regardless of the on-disk file's condition; the underlying SQLite
- * connection isn't actually opened until the first real query, and any
- * corruption/migration failure throws there instead, on a background
- * thread, from whatever call site happened to trigger it. There is no
- * single "did construction succeed" point to gate a root view on the
- * way `BreadIQApp.swift` does. Since this step wires up persistence
- * only — no screen queries this database yet (see PORTING_PLAN.md) —
- * building a recovery screen now would mean designing it against a
- * failure point this app can't yet produce or test. Revisit once a real
- * screen/repository makes the first actual query and a genuine failure
- * mode (corruption, a missing migration) needs somewhere to surface to.
+ * "Try Again"/"Erase & Start Fresh") now has a real equivalent** —
+ * `DatabaseProvider.openEagerly`/`.eraseLocalStore`, gated by
+ * `MainActivity.kt`'s own `DbOpenState`. Room's `.build()` is still
+ * *lazy* by nature — it returns a working `BreadIQDatabase` reference
+ * immediately regardless of the on-disk file's condition; the
+ * underlying SQLite connection isn't actually opened until the first
+ * real query. `openEagerly` closes that gap by forcing the open at
+ * launch, on purpose, the one place this app calls `openHelper.writableDatabase`
+ * just to find out whether it would have thrown. See
+ * [DatabaseProvider]'s own doc comment for the fuller writeup.
  */
 @Database(
     entities = [

@@ -170,11 +170,16 @@ class MainActivity : ComponentActivity() {
     private var pendingDeepLinkUri by mutableStateOf<Uri?>(null)
 
     /**
-     * The token from a captured `DeepLinkDestination.ImportToken` — set,
-     * never yet read. `PendingImportsListScreen` (a separate, explicitly
-     * out-of-scope follow-up session) is the intended consumer; this
-     * session only makes sure a tapped import link isn't silently
-     * dropped on the floor.
+     * The token from a captured `DeepLinkDestination.ImportToken` — real
+     * now: threaded down to [BreadIQApp]'s Calculator route the same way
+     * [pendingRecipeId]/`pendingSchedulePlan` already are, consumed by
+     * `CalculatorViewModel.fetchStagedImport` the moment that route
+     * composes (see `BreadIQApp`'s own doc comment on why it can't be
+     * consumed directly here — the fetch needs a live `CalculatorViewModel`,
+     * which only exists once that route composes). `PendingImportsListScreen`
+     * (the Chrome-extension cross-device inbox, a separate follow-up
+     * session) is a different, still out-of-scope entry point into this
+     * same single-token pipeline.
      */
     private var pendingImportToken by mutableStateOf<String?>(null)
 
@@ -258,7 +263,11 @@ class MainActivity : ComponentActivity() {
                                 onComplete = { pendingDeepLinkUri = null },
                             )
                             uiState.currentUser == null -> AuthScreen(authViewModel)
-                            else -> BreadIQApp(authViewModel, subscriptionViewModel, temperatureUnitStore)
+                            else -> BreadIQApp(
+                                authViewModel, subscriptionViewModel, temperatureUnitStore,
+                                pendingImportToken = pendingImportToken,
+                                onImportTokenConsumed = { pendingImportToken = null },
+                            )
                         }
                     }
                 }
@@ -389,6 +398,9 @@ fun BreadIQApp(
     authViewModel: AuthViewModel,
     subscriptionViewModel: SubscriptionViewModel,
     temperatureUnitStore: TemperatureUnitStore,
+    /** The browser-extension deep-link token captured into this Activity's own `pendingImportToken` field — same threading shape as [pendingRecipeId]/[pendingSchedulePlan] below, consumed once the Calculator route actually composes (it needs a live `CalculatorViewModel`, which only exists there). */
+    pendingImportToken: String? = null,
+    onImportTokenConsumed: () -> Unit = {},
 ) {
     val navController = rememberNavController()
 
@@ -440,6 +452,11 @@ fun BreadIQApp(
             composable(BreadIQDestination.CALCULATOR.route) {
                 val context = LocalContext.current
                 val calculatorViewModel: CalculatorViewModel = viewModel(factory = CalculatorViewModelFactory(context, subscriptionViewModel, temperatureUnitStore))
+                LaunchedEffect(pendingImportToken) {
+                    val token = pendingImportToken ?: return@LaunchedEffect
+                    calculatorViewModel.fetchStagedImport(token)
+                    onImportTokenConsumed()
+                }
                 LaunchedEffect(pendingRecipeId) {
                     val id = pendingRecipeId ?: return@LaunchedEffect
                     calculatorViewModel.loadFromRecipe(id)

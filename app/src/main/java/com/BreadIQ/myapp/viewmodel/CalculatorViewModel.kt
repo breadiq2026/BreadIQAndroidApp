@@ -14,7 +14,15 @@ import com.BreadIQ.myapp.core.BakeStepAssembler
 import com.BreadIQ.myapp.core.CalculatorFormatting
 import com.BreadIQ.myapp.core.FormulaCalculator
 import com.BreadIQ.myapp.core.FormulaInput
+import com.BreadIQ.myapp.core.CalculatorImportApplier
+import com.BreadIQ.myapp.core.CalculatorImportMapping
+import com.BreadIQ.myapp.core.CalculatorImportMappingResult
+import com.BreadIQ.myapp.core.ImportReviewFormatting
+import com.BreadIQ.myapp.core.ImportStagingFetching
 import com.BreadIQ.myapp.core.IngredientCostSyncing
+import com.BreadIQ.myapp.core.StagedImportFetchOutcome
+import com.BreadIQ.myapp.core.StagedImportPayload
+import com.BreadIQ.myapp.core.UnconfiguredImportStagingFetcher
 import com.BreadIQ.myapp.core.UnconfiguredIngredientCostSyncService
 import com.BreadIQ.myapp.core.ProofStageNarrator
 import com.BreadIQ.myapp.core.ProofTimeCalculator
@@ -24,6 +32,7 @@ import com.BreadIQ.myapp.core.RecipeXLSXExportContext
 import com.BreadIQ.myapp.core.RecipeXLSXExporter
 import com.BreadIQ.myapp.core.swiftRounded
 import com.BreadIQ.myapp.data.BackendApiClient
+import com.BreadIQ.myapp.data.BackendImportStagingFetcher
 import com.BreadIQ.myapp.data.BackendIngredientCostSyncService
 import com.BreadIQ.myapp.data.SupabaseAuthService
 import com.BreadIQ.myapp.data.SupabaseClientProvider
@@ -57,6 +66,7 @@ import com.BreadIQ.myapp.model.prefermentTypes
 import com.BreadIQ.myapp.model.QueuedBake
 import com.BreadIQ.myapp.model.QueuedBakeConfig
 import com.BreadIQ.myapp.model.QueuedBakeStepPlan
+import com.BreadIQ.myapp.ui.calculator.ImportReviewOutcome
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -74,9 +84,10 @@ import java.io.File
  * **Fields that only exist to support a still-deferred flow are left out
  * entirely rather than carried as dead state** — they'll be added back
  * when that flow is actually built: `scheduleBakePlan`/
- * `scheduledConfirmation`/`calendarEventError` (Schedule), every
- * `import*`/`pending*` field (Import), `recipeSyncErrorMessage` (backend
- * recipe sync). `showNutritionAnalysis`/`showAutolyseGuidance` are also
+ * `scheduledConfirmation`/`calendarEventError` (Schedule),
+ * `recipeSyncErrorMessage` (backend recipe sync). The `import*`/`pending*`
+ * fields are real now — see their own doc comments (Import Review
+ * screen session). `showNutritionAnalysis`/`showAutolyseGuidance` are also
  * left out — those two map to Compose Nav destinations for this port
  * (see `AutolyseGuidanceScreen`/`NutritionAnalysisScreen`'s own porting
  * step) rather than SwiftUI `.sheet(isPresented:)` booleans threaded
@@ -162,6 +173,30 @@ data class CalculatorUiState(
     val savedId: Int? = null,
     val loadedFromRecipeId: Int? = null,
     val loadedFromRecipeName: String = "",
+
+    // Import (browser-extension deep link -> single staged import,
+    // IMPORT_REVIEW_SPEC.md). `importReview` non-null means "show
+    // ImportReviewScreen instead of the normal card content" — the
+    // direct analog of the source's own `importReview: (payload:
+    // StagedImportPayload, mapping: CalculatorImportMapping)?`.
+    val importFetching: Boolean = false,
+    val importError: String? = null,
+    val importReview: Pair<StagedImportPayload, CalculatorImportMapping>? = null,
+    /**
+     * Set true once [applyImportReviewOutcome] confirms an import —
+     * drives the mandatory auto-save in [calculate] (`IMPORT_REVIEW_SPEC.md`
+     * §5) and is cleared after the first attempt so re-calculating within
+     * the same session doesn't re-save. The three `pending*` fields below
+     * carry the review screen's format note and the staged payload's
+     * source info through to that auto-save, since neither is known yet
+     * at [Recipe]-construction time inside [handleSaveRecipe]'s existing
+     * shape — same lifetime pattern already used for [recipeName] (set
+     * well before [calculate], read inside it).
+     */
+    val isImportSession: Boolean = false,
+    val pendingImportSourceURL: String? = null,
+    val pendingImportSourceName: String? = null,
+    val pendingFormatNote: String? = null,
 
     // Alerts — plain nullable message state; the Composable screen (task
     // #6/#7) renders these as alert dialogs and clears them back to null.
@@ -297,6 +332,8 @@ class CalculatorViewModel(
      * own doc comment.
      */
     private val ingredientCostSyncService: IngredientCostSyncing = UnconfiguredIngredientCostSyncService(),
+    /** `GET /api/import/staged/:token` — the browser-extension deep-link handoff. See [fetchStagedImport]. */
+    private val importStagingFetcher: ImportStagingFetching = UnconfiguredImportStagingFetcher,
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(CalculatorUiState(temperatureUnit = temperatureUnitStore.unit.value))
@@ -573,12 +610,28 @@ class CalculatorViewModel(
         val pResult = ProofStageNarrator.narrate(proofInput, math, s.temperatureUnit)
 
         update { it.copy(formulaResult = fResult, proofResult = pResult, loading = false) }
+
+        // IMPORT_REVIEW_SPEC.md §5's mandatory (not optional) auto-save —
+        // fires on the FIRST successful calculation for an import-
+        // originated session, not at the review screen itself, since
+        // fermentation/environment inputs (which affect the saved
+        // proofMinutes etc.) haven't been set yet at that point.
+        // `s.isImportSession` (captured at the top of this function,
+        // before any update{} calls) reflects applyImportReviewOutcome's
+        // own flip of this flag — nothing else changes it in between.
+        if (s.isImportSession) {
+            autoSaveImportedRecipe()
+            update { it.copy(isImportSession = false) }
+        }
     }
 
     private fun rhDirection(s: CalculatorUiState): String? =
         if (!s.isHumidityMode) null else if (s.relativeHumidity >= 65) "high" else if (s.relativeHumidity <= 35) "low" else null
 
-    private fun buildRecipe(s: CalculatorUiState, formulaResult: FormulaResult, id: Int, name: String): Recipe {
+    private fun buildRecipe(
+        s: CalculatorUiState, formulaResult: FormulaResult, id: Int, name: String,
+        importSourceURL: String? = null, importSourceName: String? = null, formatNote: String? = null,
+    ): Recipe {
         val rhDir = rhDirection(s)
         val standardWater = if (rhDir != null)
             (((formulaResult.flourWeight * s.hydration / 100) - (formulaResult.sweetenerWaterWeight ?: 0.0)) * 10).swiftRounded() / 10
@@ -600,6 +653,7 @@ class CalculatorViewModel(
             sweetenerWeight = if (s.sweetenerType != null) formulaResult.sweetenerWeight else null,
             humidityRh = if (rhDir != null) s.relativeHumidity.toInt() else null, humidityDirection = rhDir, humidityAdjusted = rhDir != null,
             waterWeightUnadjusted = standardWater,
+            importSourceURL = importSourceURL, importSourceName = importSourceName, formatNote = formatNote,
         )
     }
 
@@ -636,6 +690,133 @@ class CalculatorViewModel(
         viewModelScope.launch {
             recipeDao.upsert(updated.toEntity())
             update { it.copy(savedId = updated.id, loadedFromRecipeId = null, saving = false) }
+        }
+    }
+
+    // MARK: - Import (browser-extension deep link -> ImportReviewScreen)
+
+    /**
+     * `fetchPendingImportToken()` — `GET /api/import/staged/:token`, then
+     * [CalculatorImportApplier.map]'s pure style mapping. Supersedes the
+     * old "fetch, silently apply, show a banner" flow entirely, per
+     * `IMPORT_REVIEW_SPEC.md`'s own framing — nothing here writes into
+     * this ViewModel's real formula state; it only populates [importReview][CalculatorUiState.importReview]
+     * for `ImportReviewScreen` to render, then [applyImportReviewOutcome]
+     * is the one place a confirmed import actually reaches real state.
+     */
+    fun fetchStagedImport(token: String) {
+        update { it.copy(importFetching = true, importError = null, importReview = null) }
+        viewModelScope.launch {
+            when (val outcome = importStagingFetcher.fetchStagedImport(token)) {
+                is StagedImportFetchOutcome.Success -> {
+                    when (val mappingResult = CalculatorImportApplier.map(outcome.payload.ingredients)) {
+                        is CalculatorImportMappingResult.Success -> update {
+                            it.copy(importFetching = false, importReview = outcome.payload to mappingResult.mapping)
+                        }
+                        is CalculatorImportMappingResult.Failure -> update {
+                            it.copy(importFetching = false, importError = "No flour found in this import — cannot populate calculator.")
+                        }
+                    }
+                }
+                is StagedImportFetchOutcome.Failure -> update {
+                    it.copy(importFetching = false, importError = outcome.error.message)
+                }
+            }
+        }
+    }
+
+    /** "Start from Scratch" on `ImportReviewScreen` — discards the fetched review with zero trace left in real calculator state. */
+    fun clearImportReview() = update { it.copy(importReview = null) }
+
+    /**
+     * `ImportReviewScreen`'s `onContinue` handler — the only place a
+     * staged import's fields actually reach this ViewModel's real state,
+     * matching `IMPORT_REVIEW_SPEC.md` §2's "no silent style-forcing"
+     * decision: everything below only runs after the user has explicitly
+     * reviewed and confirmed on that screen, never automatically. Calls
+     * [selectStyle] first so style-derived defaults [ImportReviewOutcome]
+     * doesn't carry are still correct, then overwrites every field
+     * [selectStyle] just set with the outcome's real values. Jumps
+     * straight to Card 3 (Environment), skipping 0-2 entirely, per spec
+     * §4's flow diagram.
+     */
+    fun applyImportReviewOutcome(outcome: ImportReviewOutcome, payload: StagedImportPayload) {
+        BreadStyleCatalog.all.firstOrNull { it.value == outcome.styleValue }?.let { selectStyle(it) }
+        update { s ->
+            // Dairy-import-to-milk-slot wiring — only for the two styles
+            // whose formula actually reads milkPercent through a "milk"
+            // liquidType (see FormulaInput's own milkPercent branch in
+            // calculate()). An import with no dairy ingredient
+            // (outcome.milkPercent == null) leaves selectStyle's own
+            // defaults (just applied above) untouched.
+            val milkApplies = outcome.milkPercent != null && (outcome.styleValue == "brioche" || outcome.styleValue == "soft_roll")
+            s.copy(
+                selectedShapeValue = outcome.shapeValue,
+                numLoaves = outcome.numLoaves,
+                hydration = outcome.hydration,
+                fat = outcome.fat,
+                salt = outcome.salt,
+                yeast = outcome.yeast,
+                yeastType = outcome.yeastType,
+                sweetenerType = outcome.sweetenerType,
+                sweetenerPct = outcome.sweetenerPct,
+                milkPercent = if (milkApplies) outcome.milkPercent!! else s.milkPercent,
+                liquidType = if (milkApplies) "milk" else s.liquidType,
+                dairyDisplayName = if (milkApplies) outcome.dairyDisplayName else s.dairyDisplayName,
+                flourBlend = outcome.flourBlend,
+                isHumidityMode = outcome.isHumidityMode,
+                relativeHumidity = outcome.relativeHumidity,
+                usePrefermant = outcome.usePrefermant,
+                prefermentType = outcome.prefermentType,
+                useColdRetard = outcome.useColdRetard,
+                coldRetardHours = outcome.coldRetardHours,
+                isImportSession = true,
+                pendingImportSourceURL = payload.sourceURL,
+                pendingImportSourceName = ImportReviewFormatting.sourceDomain(payload.sourceURL),
+                pendingFormatNote = outcome.formatNote.ifEmpty { null },
+                recipeName = payload.recipeName?.takeIf { it.isNotEmpty() } ?: "Imported Recipe",
+                importReview = null,
+                cardIndex = 3,
+            )
+        }
+    }
+
+    /**
+     * `IMPORT_REVIEW_SPEC.md` §5's mandatory auto-save — fires on the
+     * first successful calculation for an import-originated session (see
+     * [calculate]'s own call site), not at the review screen itself,
+     * since fermentation/environment inputs haven't been set yet at that
+     * point. Reuses [buildRecipe] exactly, plus the three pending
+     * import-only fields, with one deliberate difference from a plain
+     * "always save": **respects the existing Basic/Premium paywall**,
+     * the same gate [handleSaveRecipe]'s own manual save already uses —
+     * a free-tier import still calculates and applies to the calculator
+     * normally, it just doesn't persist. Local-only save, matching
+     * [handleSaveRecipe]'s own current scope boundary — no backend sync
+     * call here either, for the same reason.
+     */
+    private fun autoSaveImportedRecipe() {
+        val s = _uiState.value
+        val formulaResult = s.formulaResult ?: return
+        if (!s.isBasicOrPremium) {
+            showUpgradeAlert(
+                "Imported Recipe Not Saved",
+                "This import was calculated but not saved — saving recipes requires a Basic or Premium subscription. Upgrade to save up to 10 recipes with Basic, or 50 with Premium.",
+            )
+            return
+        }
+
+        val rhDir = rhDirection(s)
+        val baseName = s.recipeName.trim().ifEmpty { "Imported Recipe" }
+        val saveName = if (rhDir != null) "$baseName — Humidity Adjusted (${s.relativeHumidity.toInt()}% RH)" else baseName
+        val recipe = buildRecipe(
+            s, formulaResult, CalculatorFormatting.nextLocalRecipeId(s.recipes), saveName,
+            importSourceURL = s.pendingImportSourceURL, importSourceName = s.pendingImportSourceName, formatNote = s.pendingFormatNote,
+        )
+
+        viewModelScope.launch {
+            recipeDao.upsert(recipe.toEntity())
+            update { it.copy(savedId = recipe.id) }
         }
     }
 
@@ -909,6 +1090,7 @@ class CalculatorViewModelFactory(
             appContext = appContext,
             subscriptionViewModel = subscriptionViewModel,
             ingredientCostSyncService = BackendIngredientCostSyncService(backendClient),
+            importStagingFetcher = BackendImportStagingFetcher(backendClient),
         ) as T
     }
 }

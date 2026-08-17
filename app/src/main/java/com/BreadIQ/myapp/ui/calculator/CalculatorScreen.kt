@@ -2,6 +2,7 @@ package com.BreadIQ.myapp.ui.calculator
 
 import android.content.Intent
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -24,6 +25,7 @@ import androidx.compose.material.icons.filled.Description
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -96,6 +98,26 @@ fun CalculatorScreen(
     val colors = LocalBreadIQColors.current
     val context = LocalContext.current
 
+    // Full-screen replacement while a staged import is under review — the
+    // direct analog of the source's own `.fullScreenCover`, which fully
+    // obscures CalculatorScreen underneath rather than sitting as a sheet/
+    // overlay on top of it. An early return here reproduces that same
+    // "nothing else in this composable renders" shape.
+    val importReview = state.importReview
+    if (importReview != null) {
+        val (payload, mapping) = importReview
+        ImportReviewScreen(
+            payload = payload,
+            mapping = mapping,
+            onContinue = { outcome ->
+                viewModel.applyImportReviewOutcome(outcome, payload)
+                Haptics.notification(context, HapticNotificationType.SUCCESS)
+            },
+            onDiscard = viewModel::clearImportReview,
+        )
+        return
+    }
+
     Column(
         modifier = modifier
             .fillMaxSize()
@@ -118,6 +140,8 @@ fun CalculatorScreen(
                 .padding(top = 4.dp, bottom = 100.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
+            ImportStatusBanner(fetching = state.importFetching, error = state.importError)
+
             when (state.cardIndex) {
                 0 -> CardStyleShapeBatch(state = state, viewModel = viewModel)
                 1 -> CardFlourAndFormula(state = state, viewModel = viewModel)
@@ -136,8 +160,17 @@ fun CalculatorScreen(
             onBackClick = viewModel::previousCard,
             onNextClick = viewModel::nextCard,
             onCalculateClick = {
+                // Fire-and-forget timing, matching this file's existing
+                // precedent elsewhere (e.g. handleSaveRecipe's own
+                // success haptic) — fired the moment the action is
+                // called, not gated on calculate()'s async auto-save
+                // actually finishing. Read isImportSession BEFORE
+                // calling calculate(), since calculate() clears it back
+                // to false as part of the same call.
+                val wasImportSession = state.isImportSession
                 viewModel.calculate()
                 Haptics.impact(context, HapticImpactStyle.LIGHT)
+                if (wasImportSession) Haptics.notification(context, HapticNotificationType.SUCCESS)
             },
         )
     }
@@ -296,6 +329,37 @@ private fun CalculatorHeader(
                 )
             }
         }
+    }
+}
+
+/**
+ * `importStatusBanner` — the fetching/error states only (a loading row
+ * while `importFetching`, an amber warning row with `importError`'s
+ * message when set). Sits at the top of the scrollable card content,
+ * matching the source's own placement, right before the per-card
+ * switch. **Deliberately does NOT include the "N recipes waiting from
+ * your browser" banner button** — that's `PendingImportsListScreen`'s
+ * own follow-up session; this app has no `pendingStagedImports`
+ * equivalent yet.
+ */
+@Composable
+private fun ImportStatusBanner(fetching: Boolean, error: String?) {
+    val colors = LocalBreadIQColors.current
+    if (fetching) {
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
+            Text("Loading imported recipe…", fontSize = 13.sp, color = colors.mutedForeground)
+        }
+    } else if (error != null) {
+        Text(
+            "⚠ $error", fontSize = 12.sp, color = Color(0xFF92400E),
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(8.dp))
+                .background(Color(0xFFFFFBEB))
+                .border(1.dp, Color(0xFFFDE68A), RoundedCornerShape(8.dp))
+                .padding(10.dp),
+        )
     }
 }
 

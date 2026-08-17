@@ -53,6 +53,7 @@ import com.BreadIQ.myapp.ui.components.Card
 import com.BreadIQ.myapp.ui.theme.LocalBreadIQColors
 import com.BreadIQ.myapp.viewmodel.CalculatorViewModel
 import com.BreadIQ.myapp.viewmodel.CalculatorViewModelFactory
+import com.BreadIQ.myapp.viewmodel.SubscriptionViewModelFactory
 
 /**
  * Ported from the iOS app's `Screens/CalculatorScreen.swift` — the
@@ -72,10 +73,18 @@ import com.BreadIQ.myapp.viewmodel.CalculatorViewModelFactory
 @Composable
 fun CalculatorScreen(
     modifier: Modifier = Modifier,
-    viewModel: CalculatorViewModel = viewModel(factory = CalculatorViewModelFactory(LocalContext.current)),
+    // The default here isn't the shared Activity-scoped SubscriptionViewModel
+    // MainActivity.kt's BreadIQApp() threads in explicitly — it's a
+    // fallback only, for a caller that doesn't pass `viewModel:` itself
+    // (nothing in this app actually relies on it; every real call site
+    // passes an explicit `viewModel`).
+    viewModel: CalculatorViewModel = viewModel(
+        factory = CalculatorViewModelFactory(LocalContext.current, viewModel(factory = SubscriptionViewModelFactory(LocalContext.current))),
+    ),
     onOpenNutrition: () -> Unit = {},
     onOpenAutolyse: () -> Unit = {},
     onOpenImport: () -> Unit = {},
+    onOpenSubscription: () -> Unit = {},
     onStartedBake: (String) -> Unit = {},
     onScheduleBake: (RawScheduledBakePlan) -> Unit = {},
 ) {
@@ -174,8 +183,20 @@ fun CalculatorScreen(
             onDismissRequest = { viewModel.update { it.copy(upgradePromptTitle = null, upgradePromptBody = null) } },
             title = { Text(upgradeTitle) },
             text = { Text(upgradeBody ?: "") },
+            // "See Plans" now routes to the real SubscriptionScreen —
+            // no SubscriptionScreen existed yet when this alert was
+            // first wired (it showed a single dismiss button then, per
+            // this function's own now-outdated doc comment history);
+            // matches the source's real two-button alert exactly
+            // ("Maybe later" / "See Plans" → present(.subscription)).
+            dismissButton = {
+                TextButton(onClick = { viewModel.update { it.copy(upgradePromptTitle = null, upgradePromptBody = null) } }) { Text("Maybe later") }
+            },
             confirmButton = {
-                TextButton(onClick = { viewModel.update { it.copy(upgradePromptTitle = null, upgradePromptBody = null) } }) { Text("OK") }
+                TextButton(onClick = {
+                    viewModel.update { it.copy(upgradePromptTitle = null, upgradePromptBody = null) }
+                    onOpenSubscription()
+                }) { Text("See Plans") }
             },
         )
     }

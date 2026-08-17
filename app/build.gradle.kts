@@ -101,6 +101,15 @@ dependencies {
     implementation(libs.androidx.camera.view)
     implementation(libs.mlkit.text.recognition)
 
+    // RevenueCat (PORTING_PLAN.md step 6, RevenueCat + Subscription
+    // screen) — owns the Play Billing purchase flow, server-side
+    // receipt validation, and entitlement caching. Ships its own Kotlin
+    // coroutine `awaitX()` suspend extensions (awaitCustomerInfo/
+    // awaitLogIn/awaitLogOut/awaitRestore/awaitOfferings/awaitPurchase)
+    // used directly in core/RevenueCatPurchasesService.kt, rather than
+    // the older callback-based `xWith(...)` API.
+    implementation(libs.revenuecat.purchases)
+
     testImplementation(libs.junit)
     androidTestImplementation(libs.androidx.junit)
     androidTestImplementation(libs.androidx.espresso.core)

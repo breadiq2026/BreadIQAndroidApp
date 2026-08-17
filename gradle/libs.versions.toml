@@ -65,6 +65,11 @@ cameraX = "1.5.1"
 # device's very first scan). 16.0.1 confirmed as latest stable via
 # Google's own ML Kit docs at the time this was added.
 mlkitTextRecognition = "16.0.1"
+# RevenueCat Android SDK, added for PORTING_PLAN.md step 6 (RevenueCat +
+# Subscription screen). 10.16.2 confirmed as the latest stable release
+# directly against Maven Central's own maven-metadata.xml (not a search
+# index, which can lag) at the time this was added — no beta/rc suffix.
+revenueCatPurchases = "10.16.2"
 
 [libraries]
 androidx-core-ktx = { group = "androidx.core", name = "core-ktx", version.ref = "coreKtx" }
@@ -98,6 +103,7 @@ androidx-camera-camera2 = { group = "androidx.camera", name = "camera-camera2", 
 androidx-camera-lifecycle = { group = "androidx.camera", name = "camera-lifecycle", version.ref = "cameraX" }
 androidx-camera-view = { group = "androidx.camera", name = "camera-view", version.ref = "cameraX" }
 mlkit-text-recognition = { group = "com.google.mlkit", name = "text-recognition", version.ref = "mlkitTextRecognition" }
+revenuecat-purchases = { group = "com.revenuecat.purchases", name = "purchases", version.ref = "revenueCatPurchases" }
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }

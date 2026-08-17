@@ -30,17 +30,22 @@ private data class ImportUrlFetchResponseDto(
  * side. Only genuinely malformed requests (missing/invalid `url`) get a
  * real 400. Both shapes decode into the same lenient DTO below rather
  * than needing separate success/failure response types.
+ *
+ * Builds its own unauthenticated [BackendApiClient] (the class's default
+ * no-token provider) — this call site never needed authentication and
+ * still doesn't, even now that [BackendApiClient] supports it.
  */
 object BackendImportURLFetcher : ImportURLFetching {
     private val json = Json { ignoreUnknownKeys = true }
+    private val client = BackendApiClient()
 
     override suspend fun fetchIngredients(url: String): ImportURLFetchOutcome {
         val requestBody = json.encodeToString(ImportUrlFetchRequestDto.serializer(), ImportUrlFetchRequestDto(url))
-        val rawResponse = BackendApiClient.postJson("/api/import/fetch-url", requestBody)
+        val rawResponse = client.send(path = "/api/import/fetch-url", method = "POST", bodyJson = requestBody, authenticated = false)
             ?: return ImportURLFetchOutcome.Failure(ImportURLFetchError("Couldn't reach the server. Check your connection and try again."))
 
         val decoded = try {
-            json.decodeFromString(ImportUrlFetchResponseDto.serializer(), rawResponse)
+            json.decodeFromString(ImportUrlFetchResponseDto.serializer(), rawResponse.body)
         } catch (e: Exception) {
             return ImportURLFetchOutcome.Failure(ImportURLFetchError("Something went wrong. Please try again."))
         }

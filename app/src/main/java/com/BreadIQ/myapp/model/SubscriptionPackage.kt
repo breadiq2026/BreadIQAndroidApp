@@ -4,11 +4,11 @@ package com.BreadIQ.myapp.model
  * Ported from the iOS app's `Models/SubscriptionPackage.swift`.
  *
  * A RevenueCat package's purchase-relevant fields, already classified
- * into a `tier`/`period` at the SDK boundary (see the iOS
- * `SubscriptionPackageClassification` type this ports, whose job is
- * classifying `productIdentifier` once here rather than re-deriving it
- * from string matching in view logic — port that classifier alongside
- * `purchases-android` wiring in a later phase).
+ * into a `tier`/`period` at the SDK boundary —
+ * `core/SubscriptionPackageClassification.kt` classifies
+ * `productIdentifier` once, inside `core/RevenueCatPurchasesService.kt`'s
+ * own `fetchOfferings()` mapping, rather than re-deriving it from string
+ * matching in view logic.
  *
  * Not persisted/serialized: this is a value mapped from a live
  * RevenueCat SDK object at runtime, not JSON fetched/persisted directly —

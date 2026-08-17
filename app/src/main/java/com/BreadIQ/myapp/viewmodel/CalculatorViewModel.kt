@@ -197,10 +197,14 @@ data class CalculatorUiState(
 
     /**
      * Mirrors the source's `@Environment(SubscriptionStore.self)`-derived
-     * `userTier`. Hardcoded to [BakeUserTier.FREE] — see
-     * [BakeUserTier]'s own doc comment for why (no `SubscriptionStore`
-     * port exists yet; this is its own already-planned, independent
-     * sequence item).
+     * `userTier` — real now, kept live from the shared
+     * [com.BreadIQ.myapp.viewmodel.SubscriptionViewModel] (Activity-scoped,
+     * threaded in via [CalculatorViewModelFactory]) rather than hardcoded.
+     * Defaults to [BakeUserTier.FREE] only for the brief window before
+     * that store's first tier resolution completes — the same honest
+     * "no subscription information available yet" fallback
+     * [BakeUserTier]'s own doc comment already describes, now genuinely
+     * transient instead of permanent.
      */
     val userTier: BakeUserTier = BakeUserTier.FREE,
 )
@@ -267,6 +271,8 @@ class CalculatorViewModel(
     temperatureUnitStore: TemperatureUnitStore,
     /** Only used by [shareRecipe] (writing the exported `.xlsx` to cache + building its `FileProvider` `Uri`) — an application [Context], never a leak-risk Activity one, same as every other app-Context-holding object in this codebase. */
     private val appContext: Context,
+    /** The shared, Activity-scoped [SubscriptionViewModel] — see [CalculatorUiState.userTier]'s own doc comment. */
+    private val subscriptionViewModel: SubscriptionViewModel,
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(CalculatorUiState(temperatureUnit = temperatureUnitStore.unit))
@@ -291,6 +297,12 @@ class CalculatorViewModel(
         viewModelScope.launch {
             bakeSessionDao.observeAll().collect { rows ->
                 update { it.copy(sessions = rows.map { row -> row.toDomain() }) }
+            }
+        }
+        viewModelScope.launch {
+            subscriptionViewModel.uiState.collect { subState ->
+                val tier = subState.tierInfo?.tier?.let { rawValue -> BakeUserTier.entries.firstOrNull { it.rawValue == rawValue } }
+                update { it.copy(userTier = tier ?: BakeUserTier.FREE) }
             }
         }
     }
@@ -812,7 +824,17 @@ class CalculatorViewModel(
  * and [TemperatureUnitStore] — same plain-`ViewModelProvider.Factory`
  * shape as `AuthViewModelFactory`.
  */
-class CalculatorViewModelFactory(private val context: Context) : ViewModelProvider.Factory {
+/**
+ * [subscriptionViewModel] is the app's single, Activity-scoped
+ * [SubscriptionViewModel] instance (`MainActivity`'s own `by viewModels {}`)
+ * — threaded in explicitly by the caller (`MainActivity.kt`'s
+ * `BreadIQApp` composable) rather than constructed fresh here, since a
+ * new [ViewModelProvider.Factory] is built at every `CalculatorScreen`/
+ * `NutritionAnalysisScreen`/`AutolyseGuidanceScreen` nav-route call site
+ * and none of them should ever end up with their own independent
+ * `SubscriptionViewModel`.
+ */
+class CalculatorViewModelFactory(private val context: Context, private val subscriptionViewModel: SubscriptionViewModel) : ViewModelProvider.Factory {
     override fun <T : ViewModel> create(modelClass: Class<T>): T {
         val appContext = context.applicationContext
         val db = DatabaseProvider.getInstance(appContext)
@@ -825,6 +847,7 @@ class CalculatorViewModelFactory(private val context: Context) : ViewModelProvid
             bakeSessionDao = db.bakeSessionDao(),
             temperatureUnitStore = TemperatureUnitStore(prefs),
             appContext = appContext,
+            subscriptionViewModel = subscriptionViewModel,
         ) as T
     }
 }

@@ -7,13 +7,13 @@ package com.BreadIQ.myapp.model
  * widely enough — the Calculator screen's tier gating needs it now —
  * that it's worth splitting out on its own rather than waiting).
  *
- * **No real subscription store exists on Android yet** (`SubscriptionStore.swift`/
- * `RevenueCatPurchasesService.swift` are their own already-planned,
- * independent porting item — see PORTING_PLAN.md's RevenueCat step).
- * Every call site that needs a [BakeUserTier] today reads a hardcoded
- * [BakeUserTier.FREE] until that step lands — the correct, honest
- * fallback for "no subscription information available yet" rather than
- * a guess at a different default.
+ * **A real subscription store exists now** (`viewmodel/SubscriptionViewModel.kt`,
+ * backed by `core/RevenueCatPurchasesService.kt` — PORTING_PLAN.md's
+ * RevenueCat step) — `CalculatorViewModel.userTier` resolves for real
+ * from it. [BakeUserTier.FREE] is still the honest default for the
+ * brief window before that store's first tier resolution completes, or
+ * for any call site that hasn't been threaded a live tier yet — no
+ * longer a permanent stand-in.
  */
 enum class BakeUserTier(val rawValue: String) {
     FREE("free"),

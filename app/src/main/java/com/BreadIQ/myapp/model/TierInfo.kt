@@ -1,5 +1,7 @@
 package com.BreadIQ.myapp.model
 
+import kotlinx.serialization.Serializable
+
 /**
  * Ported from the iOS app's `Models/TierInfo.swift`.
  *
@@ -18,7 +20,13 @@ package com.BreadIQ.myapp.model
  * modeled as a plain value type — matching `FormulaResult`/
  * `ProofTimeResult`'s treatment of "a value fetched/computed fresh, not
  * independently persisted."
+ *
+ * `@Serializable` — [com.BreadIQ.myapp.data.BackendTierService] decodes
+ * `GET /api/me/tier`'s response directly into this type; field names
+ * match the wire response exactly, confirmed against the source, no
+ * mapping/DTO layer needed.
  */
+@Serializable
 data class TierInfo(
     /**
      * Kept as a plain `String` rather than a `free`/`basic`/`premium`

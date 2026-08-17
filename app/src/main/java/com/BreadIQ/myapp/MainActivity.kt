@@ -56,10 +56,13 @@ import com.BreadIQ.myapp.ui.queue.QueueScreen
 import com.BreadIQ.myapp.ui.recipes.RecipesScreen
 import com.BreadIQ.myapp.ui.schedule.ScheduleScreen
 import com.BreadIQ.myapp.ui.theme.BreadIQTheme
+import com.BreadIQ.myapp.ui.subscription.SubscriptionScreen
 import com.BreadIQ.myapp.viewmodel.AuthViewModel
 import com.BreadIQ.myapp.viewmodel.AuthViewModelFactory
 import com.BreadIQ.myapp.viewmodel.CalculatorViewModel
 import com.BreadIQ.myapp.viewmodel.CalculatorViewModelFactory
+import com.BreadIQ.myapp.viewmodel.SubscriptionViewModel
+import com.BreadIQ.myapp.viewmodel.SubscriptionViewModelFactory
 import com.BreadIQ.myapp.viewmodel.autolyseGuidance
 import com.BreadIQ.myapp.viewmodel.selectedShape
 
@@ -88,6 +91,17 @@ class MainActivity : ComponentActivity() {
     }
 
     /**
+     * Activity-scoped, matching [SubscriptionViewModel]'s own doc
+     * comment on why — a single shared instance readable from this
+     * Activity's login/logout binding below, from `CalculatorViewModel`
+     * (via [CalculatorViewModelFactory]), and from `SubscriptionScreen`
+     * itself.
+     */
+    private val subscriptionViewModel: SubscriptionViewModel by viewModels {
+        SubscriptionViewModelFactory(applicationContext)
+    }
+
+    /**
      * Requested once, early — see `core/BakeNotificationScheduler.kt`'s
      * own doc comment on why this can't be lazy the way the iOS source's
      * `requestAuthorization()` is (Android's runtime permission dialog
@@ -107,10 +121,25 @@ class MainActivity : ComponentActivity() {
         setContent {
             BreadIQTheme {
                 val uiState by authViewModel.uiState.collectAsStateWithLifecycle()
+
+                // RevenueCat identity binding (PORTING_PLAN.md step 6) —
+                // the direct analog of RootView.swift's own AuthPhase/
+                // subscriptionAction(for:) three-way branch. Deliberately
+                // keyed on currentUser?.id alone, not the whole
+                // CurrentUser? value — see authPhase()'s own doc comment.
+                val phase = authPhase(isLoading = uiState.isLoading, userId = uiState.currentUser?.id)
+                LaunchedEffect(phase) {
+                    when (val action = subscriptionAction(phase)) {
+                        is SubscriptionBindingAction.Login -> subscriptionViewModel.login(action.userId)
+                        SubscriptionBindingAction.Logout -> subscriptionViewModel.logout()
+                        null -> Unit
+                    }
+                }
+
                 when {
                     uiState.isLoading -> LoadingScreen()
                     uiState.currentUser == null -> AuthScreen(authViewModel)
-                    else -> BreadIQApp()
+                    else -> BreadIQApp(subscriptionViewModel)
                 }
             }
         }
@@ -149,6 +178,45 @@ class MainActivity : ComponentActivity() {
     }
 }
 
+/**
+ * The three states `RootView.swift`'s own auth-gating effect actually
+ * distinguishes.
+ *
+ * **Deliberately keyed on `currentUser?.id`, not the whole `CurrentUser?`
+ * value.** The source's effect depends on Supabase's `session` object
+ * specifically — which changes on sign-in/out/token refresh — NOT on
+ * `userName`, a separate piece of state updated independently via
+ * `AuthStore.setDisplayName`. If this were keyed on the full
+ * `CurrentUser` (which also carries `displayName`), a display-name edit
+ * would spuriously re-fire this binding, redundantly re-calling
+ * `subscriptionViewModel.login(id)` with the same id. `.id` alone
+ * captures exactly the transitions that should actually re-fire this —
+ * signed in vs. out, and which user — without that spurious re-fire.
+ */
+private sealed class AuthPhase {
+    data object Loading : AuthPhase()
+    data object SignedOut : AuthPhase()
+    data class SignedIn(val userId: String) : AuthPhase()
+}
+
+private fun authPhase(isLoading: Boolean, userId: String?): AuthPhase = when {
+    isLoading -> AuthPhase.Loading
+    userId != null -> AuthPhase.SignedIn(userId)
+    else -> AuthPhase.SignedOut
+}
+
+private sealed class SubscriptionBindingAction {
+    data class Login(val userId: String) : SubscriptionBindingAction()
+    data object Logout : SubscriptionBindingAction()
+}
+
+/** `nil` while still loading — the source's `if (loading) return;` early exit, doing neither a login nor a logout call yet. */
+private fun subscriptionAction(phase: AuthPhase): SubscriptionBindingAction? = when (phase) {
+    AuthPhase.Loading -> null
+    AuthPhase.SignedOut -> SubscriptionBindingAction.Logout
+    is AuthPhase.SignedIn -> SubscriptionBindingAction.Login(phase.userId)
+}
+
 @Composable
 private fun LoadingScreen() {
     Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
@@ -157,7 +225,7 @@ private fun LoadingScreen() {
 }
 
 @Composable
-fun BreadIQApp() {
+fun BreadIQApp(subscriptionViewModel: SubscriptionViewModel) {
     val navController = rememberNavController()
 
     // Recipes' "Load into Calculator" handoff — the Compose counterpart
@@ -207,7 +275,7 @@ fun BreadIQApp() {
         ) {
             composable(BreadIQDestination.CALCULATOR.route) {
                 val context = LocalContext.current
-                val calculatorViewModel: CalculatorViewModel = viewModel(factory = CalculatorViewModelFactory(context))
+                val calculatorViewModel: CalculatorViewModel = viewModel(factory = CalculatorViewModelFactory(context, subscriptionViewModel))
                 LaunchedEffect(pendingRecipeId) {
                     val id = pendingRecipeId ?: return@LaunchedEffect
                     calculatorViewModel.loadFromRecipe(id)
@@ -218,6 +286,7 @@ fun BreadIQApp() {
                     onOpenNutrition = { navController.navigate(BreadIQRoutes.NUTRITION_ANALYSIS) },
                     onOpenAutolyse = { navController.navigate(BreadIQRoutes.AUTOLYSE_GUIDANCE) },
                     onOpenImport = { navController.navigate(BreadIQRoutes.IMPORT) },
+                    onOpenSubscription = { navController.navigate(BreadIQRoutes.SUBSCRIPTION) },
                     onStartedBake = { sessionId -> navController.navigate("bake_detail/$sessionId") },
                     onScheduleBake = { plan ->
                         pendingSchedulePlan = plan
@@ -232,7 +301,7 @@ fun BreadIQApp() {
             composable(BreadIQRoutes.NUTRITION_ANALYSIS) {
                 val context = LocalContext.current
                 val parentEntry = remember { navController.getBackStackEntry(BreadIQDestination.CALCULATOR.route) }
-                val calculatorViewModel: CalculatorViewModel = viewModel(parentEntry, factory = CalculatorViewModelFactory(context))
+                val calculatorViewModel: CalculatorViewModel = viewModel(parentEntry, factory = CalculatorViewModelFactory(context, subscriptionViewModel))
                 val state by calculatorViewModel.uiState.collectAsStateWithLifecycle()
                 state.formulaResult?.let { formulaResult ->
                     NutritionAnalysisScreen(
@@ -247,7 +316,7 @@ fun BreadIQApp() {
             composable(BreadIQRoutes.AUTOLYSE_GUIDANCE) {
                 val context = LocalContext.current
                 val parentEntry = remember { navController.getBackStackEntry(BreadIQDestination.CALCULATOR.route) }
-                val calculatorViewModel: CalculatorViewModel = viewModel(parentEntry, factory = CalculatorViewModelFactory(context))
+                val calculatorViewModel: CalculatorViewModel = viewModel(parentEntry, factory = CalculatorViewModelFactory(context, subscriptionViewModel))
                 val state by calculatorViewModel.uiState.collectAsStateWithLifecycle()
                 AutolyseGuidanceScreen(guidance = state.autolyseGuidance, onDismiss = { navController.popBackStack() })
             }
@@ -257,6 +326,14 @@ fun BreadIQApp() {
             // Calculator" action), see its own doc comment.
             composable(BreadIQRoutes.IMPORT) {
                 ImportScreen(onClose = { navController.popBackStack() })
+            }
+            // Also doesn't read from the Calculator route's shared
+            // CalculatorViewModel — reads the shared SubscriptionViewModel
+            // directly instead (the same instance this whole BreadIQApp
+            // was handed), matching SubscriptionScreen.swift's own
+            // `@Environment(SubscriptionStore.self)` access.
+            composable(BreadIQRoutes.SUBSCRIPTION) {
+                SubscriptionScreen(viewModel = subscriptionViewModel, onClose = { navController.popBackStack() })
             }
             composable(BreadIQDestination.RECIPES.route) {
                 RecipesScreen(

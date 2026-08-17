@@ -4,6 +4,8 @@ import android.app.Application
 import com.BreadIQ.myapp.core.BakeNotificationScheduler
 import com.BreadIQ.myapp.core.CalendarEventScheduler
 import com.BreadIQ.myapp.data.local.DatabaseProvider
+import com.revenuecat.purchases.Purchases
+import com.revenuecat.purchases.PurchasesConfiguration
 
 /**
  * App-level entry point. Supabase auth/session wiring (PORTING_PLAN.md
@@ -24,8 +26,17 @@ import com.BreadIQ.myapp.data.local.DatabaseProvider
  * exists from launch, matching the iOS call site's timing even though
  * the two calls can't behave identically yet.
  *
- * RevenueCat purchase configuration is still a later porting pass; see
- * PORTING_PLAN.md.
+ * [Purchases.configure] is called eagerly here too (PORTING_PLAN.md
+ * step 6) — must run before any other `Purchases` API call, so it has
+ * to happen before [SubscriptionViewModel][com.BreadIQ.myapp.viewmodel.SubscriptionViewModel]'s
+ * own first `refreshTier()`/`refreshOfferings()` call, which can only
+ * be guaranteed by configuring here at process start rather than lazily
+ * at that ViewModel's own construction — mirrors the iOS source's own
+ * `Purchases.configure(withAPIKey:)` call in `BreadIQApp.init()`, which
+ * runs before its `SubscriptionStore`'s first refresh for the identical
+ * reason. Public SDK key for the Play Store app (RevenueCat dashboard
+ * — entitlements/products are project-scoped, shared with the iOS app,
+ * but this API key is platform-specific).
  *
  * [BakeNotificationScheduler.init]/[BakeNotificationScheduler.createNotificationChannel]
  * are called eagerly here too (PORTING_PLAN.md step 7) — the Android
@@ -45,5 +56,10 @@ class BreadIQApplication : Application() {
         BakeNotificationScheduler.init(this)
         BakeNotificationScheduler.createNotificationChannel(this)
         CalendarEventScheduler.init(this)
+        Purchases.configure(PurchasesConfiguration.Builder(this, REVENUECAT_PUBLIC_SDK_KEY).build())
+    }
+
+    private companion object {
+        const val REVENUECAT_PUBLIC_SDK_KEY = "goog_QWhHRqIUeUVxUdiduiBVXpElemC"
     }
 }

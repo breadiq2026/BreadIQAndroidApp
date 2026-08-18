@@ -21,19 +21,26 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.Description
+import androidx.compose.material.icons.filled.Inbox
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
@@ -43,6 +50,8 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.compose.LifecycleEventEffect
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.BreadIQ.myapp.core.HapticImpactStyle
 import com.BreadIQ.myapp.core.HapticNotificationType
@@ -57,6 +66,7 @@ import com.BreadIQ.myapp.ui.theme.LocalBreadIQColors
 import com.BreadIQ.myapp.viewmodel.CalculatorViewModel
 import com.BreadIQ.myapp.viewmodel.CalculatorViewModelFactory
 import com.BreadIQ.myapp.viewmodel.SubscriptionViewModelFactory
+import kotlinx.coroutines.launch
 
 /**
  * Ported from the iOS app's `Screens/CalculatorScreen.swift` — the
@@ -71,6 +81,7 @@ import com.BreadIQ.myapp.viewmodel.SubscriptionViewModelFactory
  * Compose Navigation routes, wired below — the gear icon that used to sit
  * dimmed with nowhere to navigate now opens Settings for real.
  */
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun CalculatorScreen(
     modifier: Modifier = Modifier,
@@ -97,6 +108,20 @@ fun CalculatorScreen(
     val state by viewModel.uiState.collectAsState()
     val colors = LocalBreadIQColors.current
     val context = LocalContext.current
+
+    // Chrome-extension companion's pending-imports inbox — polled on
+    // first composition and every time this screen returns to the
+    // foreground, matching RootView's own `.task` + `scenePhase ==
+    // .active` pair (see CalculatorViewModel.refreshPendingStagedImports's
+    // own doc comment). No existing "on resume" idiom elsewhere in this
+    // codebase to match; LifecycleEventEffect is the standard Compose
+    // pattern for it.
+    val coroutineScope = rememberCoroutineScope()
+    LaunchedEffect(Unit) { viewModel.refreshPendingStagedImports() }
+    LifecycleEventEffect(Lifecycle.Event.ON_RESUME) {
+        coroutineScope.launch { viewModel.refreshPendingStagedImports() }
+    }
+    var showPendingImportsList by remember { mutableStateOf(false) }
 
     // Full-screen replacement while a staged import is under review — the
     // direct analog of the source's own `.fullScreenCover`, which fully
@@ -140,7 +165,12 @@ fun CalculatorScreen(
                 .padding(top = 4.dp, bottom = 100.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
-            ImportStatusBanner(fetching = state.importFetching, error = state.importError)
+            ImportStatusBanner(
+                fetching = state.importFetching,
+                error = state.importError,
+                pendingCount = state.pendingStagedImports.size,
+                onPendingClick = { showPendingImportsList = true },
+            )
 
             when (state.cardIndex) {
                 0 -> CardStyleShapeBatch(state = state, viewModel = viewModel)
@@ -239,6 +269,19 @@ fun CalculatorScreen(
         )
     }
 
+    if (showPendingImportsList) {
+        val sheetState = rememberModalBottomSheetState()
+        PendingImportsListScreen(
+            items = state.pendingStagedImports,
+            sheetState = sheetState,
+            onDismiss = { showPendingImportsList = false },
+            onSelect = { token ->
+                viewModel.selectStagedImport(token)
+                showPendingImportsList = false
+            },
+        )
+    }
+
     // "Share Recipe" — launches the system share chooser for the .xlsx
     // CalculatorViewModel.shareRecipe() just wrote to cache, then clears
     // the one-shot state field back to null, same fire-once shape as the
@@ -333,17 +376,20 @@ private fun CalculatorHeader(
 }
 
 /**
- * `importStatusBanner` — the fetching/error states only (a loading row
- * while `importFetching`, an amber warning row with `importError`'s
- * message when set). Sits at the top of the scrollable card content,
- * matching the source's own placement, right before the per-card
- * switch. **Deliberately does NOT include the "N recipes waiting from
- * your browser" banner button** — that's `PendingImportsListScreen`'s
- * own follow-up session; this app has no `pendingStagedImports`
- * equivalent yet.
+ * `importStatusBanner` — the fetching/error states (a loading row while
+ * `importFetching`, an amber warning row with `importError`'s message
+ * when set), plus the Chrome-extension companion's pending-imports count
+ * row. Sits at the top of the scrollable card content, matching the
+ * source's own placement, right before the per-card switch. Tapping the
+ * pending-count row opens `PendingImportsListScreen`
+ * (`CalculatorScreen`'s own `showPendingImportsList` sheet), matching the
+ * source's `importStatusBanner` exactly — same banner slot, same three
+ * independent rows (fetching/error mutually exclusive with each other,
+ * the pending-count row independent of both, matching the source's own
+ * separate `if` blocks rather than one shared `else`).
  */
 @Composable
-private fun ImportStatusBanner(fetching: Boolean, error: String?) {
+private fun ImportStatusBanner(fetching: Boolean, error: String?, pendingCount: Int, onPendingClick: () -> Unit) {
     val colors = LocalBreadIQColors.current
     if (fetching) {
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -360,6 +406,26 @@ private fun ImportStatusBanner(fetching: Boolean, error: String?) {
                 .border(1.dp, Color(0xFFFDE68A), RoundedCornerShape(8.dp))
                 .padding(10.dp),
         )
+    }
+    if (pendingCount > 0) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(8.dp))
+                .background(colors.navyLight)
+                .border(1.dp, colors.primary.copy(alpha = 0.25f), RoundedCornerShape(8.dp))
+                .clickable(onClick = onPendingClick)
+                .padding(10.dp),
+        ) {
+            Icon(Icons.Filled.Inbox, contentDescription = null, tint = colors.primary, modifier = Modifier.size(15.dp))
+            Text(
+                "$pendingCount recipe${if (pendingCount == 1) "" else "s"} waiting from your browser",
+                fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = colors.primary, modifier = Modifier.weight(1f),
+            )
+            Icon(Icons.Filled.ChevronRight, contentDescription = null, tint = colors.primary, modifier = Modifier.size(13.dp))
+        }
     }
 }
 

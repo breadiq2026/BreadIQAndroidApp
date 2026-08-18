@@ -17,11 +17,15 @@ import com.BreadIQ.myapp.core.FormulaInput
 import com.BreadIQ.myapp.core.CalculatorImportApplier
 import com.BreadIQ.myapp.core.CalculatorImportMapping
 import com.BreadIQ.myapp.core.CalculatorImportMappingResult
+import com.BreadIQ.myapp.core.ImportInboxFetchOutcome
+import com.BreadIQ.myapp.core.ImportInboxFetching
 import com.BreadIQ.myapp.core.ImportReviewFormatting
 import com.BreadIQ.myapp.core.ImportStagingFetching
 import com.BreadIQ.myapp.core.IngredientCostSyncing
 import com.BreadIQ.myapp.core.StagedImportFetchOutcome
+import com.BreadIQ.myapp.core.StagedImportListItem
 import com.BreadIQ.myapp.core.StagedImportPayload
+import com.BreadIQ.myapp.core.UnconfiguredImportInboxFetcher
 import com.BreadIQ.myapp.core.UnconfiguredImportStagingFetcher
 import com.BreadIQ.myapp.core.UnconfiguredIngredientCostSyncService
 import com.BreadIQ.myapp.core.ProofStageNarrator
@@ -32,6 +36,7 @@ import com.BreadIQ.myapp.core.RecipeXLSXExportContext
 import com.BreadIQ.myapp.core.RecipeXLSXExporter
 import com.BreadIQ.myapp.core.swiftRounded
 import com.BreadIQ.myapp.data.BackendApiClient
+import com.BreadIQ.myapp.data.BackendImportInboxFetcher
 import com.BreadIQ.myapp.data.BackendImportStagingFetcher
 import com.BreadIQ.myapp.data.BackendIngredientCostSyncService
 import com.BreadIQ.myapp.data.SupabaseAuthService
@@ -182,6 +187,17 @@ data class CalculatorUiState(
     val importFetching: Boolean = false,
     val importError: String? = null,
     val importReview: Pair<StagedImportPayload, CalculatorImportMapping>? = null,
+    /**
+     * Chrome-extension companion's pending-imports inbox (`GET
+     * /api/import/staged`) — the cross-device counterpart to the
+     * Safari-extension deep link the fields above already handle.
+     * Refreshed by [refreshPendingStagedImports] (launch + foreground);
+     * [CalculatorScreen]'s import status banner surfaces the count and
+     * presents `PendingImportsListScreen` to pick one, which routes
+     * through [selectStagedImport] into the SAME [fetchStagedImport]
+     * pipeline above, unchanged.
+     */
+    val pendingStagedImports: List<StagedImportListItem> = emptyList(),
     /**
      * Set true once [applyImportReviewOutcome] confirms an import —
      * drives the mandatory auto-save in [calculate] (`IMPORT_REVIEW_SPEC.md`
@@ -334,6 +350,8 @@ class CalculatorViewModel(
     private val ingredientCostSyncService: IngredientCostSyncing = UnconfiguredIngredientCostSyncService(),
     /** `GET /api/import/staged/:token` — the browser-extension deep-link handoff. See [fetchStagedImport]. */
     private val importStagingFetcher: ImportStagingFetching = UnconfiguredImportStagingFetcher,
+    /** `GET /api/import/staged` (list) — the Chrome-extension companion's pending-imports inbox. See [refreshPendingStagedImports]. */
+    private val importInboxFetcher: ImportInboxFetching = UnconfiguredImportInboxFetcher,
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(CalculatorUiState(temperatureUnit = temperatureUnitStore.unit.value))
@@ -457,7 +475,13 @@ class CalculatorViewModel(
      * to Card 0.
      */
     fun resetToDefaults() {
-        update { CalculatorUiState(temperatureUnit = it.temperatureUnit, userTier = it.userTier, recipes = it.recipes, queuedBakeCount = it.queuedBakeCount, customIngredientPrices = it.customIngredientPrices, serverReferencePrices = it.serverReferencePrices) }
+        update {
+            CalculatorUiState(
+                temperatureUnit = it.temperatureUnit, userTier = it.userTier, recipes = it.recipes, queuedBakeCount = it.queuedBakeCount,
+                customIngredientPrices = it.customIngredientPrices, serverReferencePrices = it.serverReferencePrices,
+                pendingStagedImports = it.pendingStagedImports,
+            )
+        }
     }
 
     fun applyFlourTemplate(template: FlourBlendTemplate) {
@@ -727,6 +751,36 @@ class CalculatorViewModel(
 
     /** "Start from Scratch" on `ImportReviewScreen` — discards the fetched review with zero trace left in real calculator state. */
     fun clearImportReview() = update { it.copy(importReview = null) }
+
+    /**
+     * `refreshPendingStagedImports()` — polls the Chrome-extension
+     * companion's inbox. Called on first composition and every time
+     * `CalculatorScreen` returns to the foreground (`LifecycleEventEffect`/
+     * `ON_RESUME`), matching `RootView`'s own `.task` + `scenePhase ==
+     * .active` pair. Silent, best-effort on failure — an empty/stale list
+     * is a fine fallback for a background refresh, never surfaced to the
+     * user (matches the source's own `guard case .success(...) else {
+     * return }`).
+     */
+    suspend fun refreshPendingStagedImports() {
+        when (val outcome = importInboxFetcher.fetchPendingImports()) {
+            is ImportInboxFetchOutcome.Success -> update { it.copy(pendingStagedImports = outcome.items) }
+            is ImportInboxFetchOutcome.Failure -> Unit
+        }
+    }
+
+    /**
+     * Picking a row from `PendingImportsListScreen` — routes through the
+     * EXISTING single-token [fetchStagedImport] pipeline unchanged, same
+     * pipeline a Safari deep link already drives. Removed from
+     * [CalculatorUiState.pendingStagedImports] optimistically, matching
+     * the source's own `AppRouter.selectStagedImport` (remove-then-fetch,
+     * not fetch-then-remove).
+     */
+    fun selectStagedImport(token: String) {
+        update { it.copy(pendingStagedImports = it.pendingStagedImports.filterNot { item -> item.token == token }) }
+        fetchStagedImport(token)
+    }
 
     /**
      * `ImportReviewScreen`'s `onContinue` handler — the only place a
@@ -1091,6 +1145,7 @@ class CalculatorViewModelFactory(
             subscriptionViewModel = subscriptionViewModel,
             ingredientCostSyncService = BackendIngredientCostSyncService(backendClient),
             importStagingFetcher = BackendImportStagingFetcher(backendClient),
+            importInboxFetcher = BackendImportInboxFetcher(backendClient),
         ) as T
     }
 }

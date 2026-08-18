@@ -12,12 +12,14 @@ import io.ktor.http.contentType
 import kotlinx.serialization.Serializable
 
 /**
- * The custom BreadIQ backend (`api-server`, mounted at `/api`) — matches
- * the iOS source's `BackendConfig.baseURL`, verified live against the
- * deployed instance there, not just the source's route handlers.
+ * The custom BreadIQ backend (`api-server`, mounted at `/api`), now
+ * hosted on Vercel (migrated 2026-08-18, see the Android port status doc).
+ * iOS still points at the old Replit host (`breadlab.replit.app`) until
+ * the v1.5 cutover, since it has live users — Android has none yet, so
+ * it is safe to point straight at the new backend during development.
  */
 object BackendConfig {
-    const val BASE_URL = "https://breadlab.replit.app"
+    const val BASE_URL = "https://breadiqapi.vercel.app"
 }
 
 /**

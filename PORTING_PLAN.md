@@ -1263,6 +1263,65 @@ Concrete order:
    environment limitation as the deep-link session immediately before it
    (no attached device, no emulator/AVD). Build-verified only.
 
+   **`PendingImportsListScreen` (Chrome-extension companion's
+   cross-device pending-imports inbox) -- ✅ done 2026-08-18, 1 commit.**
+   The last remaining screen for full Android/iOS feature parity --
+   closes out the item the Import Review screen session above left as an
+   explicit out-of-scope follow-up. Unblocked by the real backend going
+   live on Vercel (`https://breadiqapi.vercel.app`, migrated off Replit
+   the same day) with a real `GET /api/import/staged` list route.
+
+   `data/BackendImportInboxFetcher.kt` -- real `ImportInboxFetching`,
+   modeled directly on `BackendImportStagingFetcher.kt` (same
+   `BackendApiClient`/`Json { ignoreUnknownKeys = true }`/status-code
+   pattern), decoding the plain JSON array response via
+   `ListSerializer(ItemDto.serializer())` matching this codebase's own
+   existing list-decoding convention (`BackendIngredientCostSyncService.kt`).
+
+   `CalculatorViewModel.kt`: `pendingStagedImports` added to
+   `CalculatorUiState` (preserved across `resetToDefaults()`, same
+   category as `recipes`/`serverReferencePrices` -- live/server-backed,
+   not calculator-derived). `refreshPendingStagedImports()` polls the
+   inbox, silent/best-effort on failure, matching the source's own
+   `guard case .success(...) else { return }`. `selectStagedImport(token)`
+   removes the row optimistically then calls the EXISTING
+   `fetchStagedImport(token)` unchanged -- same single-token pipeline a
+   Safari deep link already drives, matching the source's own
+   `AppRouter.selectStagedImport` (remove-then-fetch order preserved).
+
+   No `AppRouter`-equivalent added -- Android's existing architecture has
+   no such class and didn't need one here either; `pendingStagedImports`
+   lives on `CalculatorViewModel` alongside every other import-related
+   field, the natural, consistent home already established by the
+   Import Review screen session.
+
+   `CalculatorScreen.kt`: a `LaunchedEffect(Unit)` (first composition)
+   plus a `LifecycleEventEffect(Lifecycle.Event.ON_RESUME)` (foreground)
+   both call `refreshPendingStagedImports()` -- no existing "on resume"
+   idiom anywhere else in this codebase to match (confirmed by grepping
+   for `ON_RESUME`/`LifecycleEventObserver`), so this is a fresh but
+   standard Compose pattern, matching the source's `.task` +
+   `scenePhase == .active` pair. `ImportStatusBanner` gained the "N
+   recipes waiting from your browser" row the Import Review screen
+   session's own doc comment had explicitly flagged as missing --
+   tapping it opens the new sheet.
+
+   `ui/calculator/PendingImportsListScreen.kt` -- new, ported from the
+   source's own screen of the same name. Deliberately thin, matching the
+   source exactly: picking a row only calls `onSelect(token)`, no
+   ingredient/mapping logic of its own. Uses `ModalBottomSheet`, this
+   codebase's own established sheet pattern (`ImportScreen`/
+   `RecipesScreen`). `domainFor(sourceURL)` (leading-"www."-stripping,
+   "Unknown page" fallback) is kept local to this screen rather than
+   reusing `ImportReviewFormatting.sourceDomain`, matching the source's
+   own separate, differently-shaped private `domain(for:)` helper.
+
+   **No device/emulator smoke test this session either** -- same
+   environment limitation as every prior session (no attached device, no
+   emulator/AVD). Build-verified only (`./gradlew assembleDebug` --
+   `BUILD SUCCESSFUL`); a real authenticated round-trip against the live
+   Vercel backend is a separate, explicit follow-up verification step.
+
 
 ## Explicitly out of scope for Android v1 (per `PRODUCT_ROADMAP.md`)
 

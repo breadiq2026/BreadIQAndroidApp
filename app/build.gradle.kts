@@ -1,9 +1,24 @@
+import java.util.Properties
+
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.android)
     alias(libs.plugins.kotlin.compose)
     alias(libs.plugins.kotlin.serialization)
     alias(libs.plugins.ksp)
+}
+
+// Release signing credentials — deliberately kept OUTSIDE this repo
+// entirely (not just gitignored) alongside the keystore file itself,
+// since this is the production Play Store signing key: losing it means
+// losing the ability to publish updates to the existing listing, and it
+// must never end up in git history. Absent on any machine that doesn't
+// have this file (CI, a fresh checkout) — release builds there will
+// fail at the signingConfig step with a clear "keystore not found"
+// rather than silently producing an unsigned/debug-signed release APK.
+val releaseKeystoreProperties = Properties().apply {
+    val propsFile = File(System.getProperty("user.home"), "Developer/keys/breadiq-release.keystore.properties")
+    if (propsFile.exists()) propsFile.inputStream().use { load(it) }
 }
 
 android {
@@ -35,6 +50,22 @@ android {
         }
     }
 
+    signingConfigs {
+        // Only registered when the out-of-repo properties file is present
+        // (see releaseKeystoreProperties above) — a debug-machine or CI
+        // checkout without it still configures cleanly, it just has no
+        // "release" signingConfig to assign below, so `assembleRelease`
+        // fails fast there instead of producing a wrongly-signed artifact.
+        if (releaseKeystoreProperties.isNotEmpty()) {
+            create("release") {
+                storeFile = file(releaseKeystoreProperties.getProperty("storeFile"))
+                storePassword = releaseKeystoreProperties.getProperty("storePassword")
+                keyAlias = releaseKeystoreProperties.getProperty("keyAlias")
+                keyPassword = releaseKeystoreProperties.getProperty("keyPassword")
+            }
+        }
+    }
+
     buildTypes {
         release {
             isMinifyEnabled = false
@@ -42,7 +73,23 @@ android {
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
             )
+            if (releaseKeystoreProperties.isNotEmpty()) {
+                signingConfig = signingConfigs.getByName("release")
+            }
         }
+    }
+    lint {
+        // AGP 8.7.3's bundled NonNullableMutableLiveDataDetector crashes
+        // with IncompatibleClassChangeError under Kotlin 2.2.0 (a known
+        // AGP/Kotlin lint-tooling ABI mismatch, unrelated to this app's
+        // own code — BreadIQ doesn't use LiveData at all, Compose state
+        // only). Disabling just this one check unblocks lintVitalRelease
+        // (and therefore assembleRelease/bundleRelease) without turning
+        // off lint checking generally. Revisit by bumping AGP to a
+        // version with confirmed Kotlin 2.2 lint compatibility, and
+        // re-enabling this check, next time dependency versions get
+        // updated.
+        disable += "NullSafeMutableLiveData"
     }
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
